@@ -126,7 +126,7 @@ void createDirectoryStructure() {
     "/config"
   };
   
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < sizeof(dirs)/sizeof(dirs[0]); i++) {
     if (!SD.exists(dirs[i])) {
       if (SD.mkdir(dirs[i])) {
         Serial.printf("Created directory: %s\n", dirs[i]);
