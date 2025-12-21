@@ -1,0 +1,2 @@
+[Pac-Man Thumbnail Placeholder]
+Replace with `/games/pacman/thumb.bmp` (64x64 BMP) if you want a real image.

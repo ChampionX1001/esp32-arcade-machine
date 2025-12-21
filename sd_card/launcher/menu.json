@@ -1,0 +1,10 @@
+{
+  "menu": [
+    {
+      "id": "pacman",
+      "title": "Pac-Man",
+      "path": "/games/pacman",
+      "thumbnail": "/games/pacman/thumb.bmp"
+    }
+  ]
+}

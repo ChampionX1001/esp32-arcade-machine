@@ -1,0 +1,5 @@
+{
+  "eat": "pacman_eat.mp3",
+  "start": "pacman_start.mp3",
+  "death": "pacman_death.mp3"
+}

@@ -1,0 +1,34 @@
+{
+  "mcp23017_address": "0x20",
+  "mcp_pins": {
+    "up": 0,
+    "down": 1,
+    "left": 2,
+    "right": 3,
+    "button1": 4,
+    "button2": 5
+  },
+  "led_strip": {
+    "data_pin": 2,
+    "num_pixels": 144
+  },
+  "dfplayer": {
+    "rx_pin": 16,
+    "tx_pin": 17,
+    "startup_track": "001.mp3"
+  },
+  "display": {
+    "type": "ST7796S",
+    "rotation": 1
+  },
+  "software_version": "0.1",
+  "battery": {
+    "adc_pin": -1,
+    "voltage_divider": 2.0
+  },
+  "ui": {
+    "boot_path": "/launcher/boot.txt",
+    "menu_path": "/launcher/menu.json",
+    "ui_def": "/launcher/ui.json"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "pacman",
+  "name": "Pac-Man (minimal)",
+  "author": "Example",
+  "version": "0.1",
+  "entry": "level1.map",
+  "sprites": "sprites.json",
+  "sounds": "sounds.json"
+}

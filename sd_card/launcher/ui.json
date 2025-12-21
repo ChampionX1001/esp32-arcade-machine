@@ -1,0 +1,28 @@
+{
+  "boot": {
+    "title": "Hosyond Arcade",
+    "subtitle": "Powered by ESP32",
+    "splash": "/launcher/boot.txt",
+    "wait_for_input": true
+  },
+  "main_menu": {
+    "title": "Main Menu",
+    "options": [
+      { "id": "games", "title": "Games" },
+      { "id": "settings", "title": "Settings" },
+      { "id": "info", "title": "Info" }
+    ]
+  },
+  "settings": {
+    "title": "Settings",
+    "controls": [
+      { "id": "volume", "title": "Volume", "type": "slider", "min": 0, "max": 30 },
+      { "id": "leds", "title": "LED Strip", "type": "toggle" }
+    ]
+  },
+  "games_list": {
+    "title": "Games",
+    "layout": "horizontal",
+    "thumbnail_size": 64
+  }
+}
