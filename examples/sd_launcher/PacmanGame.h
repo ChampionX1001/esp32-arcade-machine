@@ -86,7 +86,7 @@ void PacmanGame::movePlayer(int dx, int dy) {
     map[ny].setCharAt(nx, ' ');
     // play eat sound via DFPlayer if available
     if (_df) {
-      // play sound track 3 (see sd_card/dfplayer/003.mp3)
+      // play sound track 3 (DFPlayer SD track 003.mp3)
       _df->play(3);
     }
   }

@@ -11,7 +11,7 @@ public:
     : _tft(tft), _mcp(mcp), _df(df), _batteryPin(batteryPin), _version(version) {}
 
   void showBoot(const char *path);
-  void mainMenu(const char *menuPath);
+  String mainMenu(const char *menuPath);
   void settings();
   void gamesList(const char *menuPath);
   int waitForAnyButton(unsigned long timeout = 0);
@@ -76,9 +76,9 @@ void UIEngine::showBoot(const char *path) {
 void UIEngine::setLEDsEnabled(bool on) { _ledsOn = on; }
 void UIEngine::setVolume(int vol) { _volume = constrain(vol, 0, 30); if (_df) _df->volume(_volume); }
 
-void UIEngine::mainMenu(const char *menuPath) {
+String UIEngine::mainMenu(const char *menuPath) {
   DynamicJsonDocument menuDoc(4096);
-  if (!readJSONFile(menuPath, menuDoc)) return;
+  if (!readJSONFile(menuPath, menuDoc)) return String("");
   JsonArray menu = menuDoc["menu"].as<JsonArray>();
   int sel = 0;
   while (true) {
@@ -92,7 +92,7 @@ void UIEngine::mainMenu(const char *menuPath) {
       int x = 10 + i*90;
       int y = 40;
       // thumbnail or placeholder
-      const char *thumb = menu[i]["thumbnail"]; 
+      const char *thumb = menu[i]["thumbnail"];
       _tft->fillRect(x, y, 80, 60, (i==sel)?TFT_DARKGREY:TFT_LIGHTGREY);
       _tft->setTextColor((i==sel)?TFT_YELLOW:TFT_WHITE);
       _tft->setCursor(x+5, y+65);
@@ -104,12 +104,8 @@ void UIEngine::mainMenu(const char *menuPath) {
     if (buttonPressed(3)) { sel = min((int)menu.size()-1, sel+1); delay(150); }
     if (buttonPressed(4)) { // button1: select
       const char* path = menu[sel]["path"].as<const char*>();
-      if (strcmp(path, "/games/pacman") == 0) {
-        // play dfplayer start if available
-        if (_df) _df->play(2); // track 002 set in dfplayer folder
-        // Launch Pacman (caller should instantiate)
-        break; // real flow: we return and caller launches
-      }
+      // return the selected path to the caller
+      return String(path);
     }
     if (buttonPressed(5)) { // button2: go to settings
       settings(); delay(200);

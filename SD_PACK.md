@@ -13,8 +13,11 @@ How the example launcher works
 2. The TFT displays the menu and you can navigate using the MCP23017-driven buttons or a Bluetooth controller (Bluepad32).
 3. Selecting a game will load its manifest and assets from the game's folder and start the game loop.
 
+Apps plugin format
+- You can add app folders under `/apps/`. Each app must contain a `manifest.json` with `id`, `name`, and `path` fields (path may point to an existing `/games/<game>` folder). The launcher automatically detects these apps and adds them to the menu.
+
 MP3 files
-Place real MP3 files in `/audio/` and update `games/<game>/sounds.json` to point to the correct filenames. The DFPlayer library in the example firmware will address tracks by filename if configured.
+- DFPlayer MP3 files should be placed on the DFPlayer's own microSD card (not the ESP32's SD). Use numeric filenames like `001.mp3`, `002.mp3` etc. This repository includes top-level `dfplayer/` placeholders to prepare the DFPlayer SD if needed. Update `games/<game>/sounds.json` to map named sounds to track numbers or filenames as appropriate for your DFPlayer setup.
 
 FAQ
 Q: Can I put a `.bin` firmware on the SD and make the ESP32 flash itself?
@@ -39,4 +42,4 @@ Simulating the UI on Windows
 - The simulator reads `sd_card/launcher/menu.json` and `sd_card/launcher/ui.json` and allows arrow keys and Z/X keys to simulate joystick and buttons.
 
 DFPlayer audio for the DFPlayer Mini device
-- The DFPlayer uses its OWN microSD card. Copy files named `001.mp3`, `002.mp3`, etc. into the DFPlayer's SD card. We also include `sd_card/dfplayer/` placeholders to help prepare files. Ensure the DFPlayer's files are numbered for easy mapping to track numbers used in code (e.g., `002.mp3` = track 2).
+- The DFPlayer uses its OWN microSD card. Copy files named `001.mp3`, `002.mp3`, etc. into the DFPlayer's SD card. We also include a top-level `dfplayer/` folder with placeholder MP3 files to help prepare the DFPlayer SD card. Ensure the DFPlayer's files are numbered for easy mapping to track numbers used in code (e.g., `002.mp3` = track 2).

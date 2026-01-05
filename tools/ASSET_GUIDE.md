@@ -2,7 +2,7 @@ Asset guide — creating and replacing files for the SD pack
 
 Audio
 - DFPlayer Mini supports MP3 and WAV files. Use MP3 for small size.
-- Name convention: use short, predictable names like `pacman_eat.mp3` and place them under `/audio/`.
+- Name convention: use short, predictable names like `pacman_eat.mp3`. DFPlayer files must be copied to the DFPlayer microSD card (not the ESP32 SD). Use numeric file naming (e.g., `001.mp3`, `002.mp3`) if you want to call tracks by number from the DFPlayer.
 - Many free tools can create MP3 files (Audacity, FFMPEG). For Windows, use:
   ffmpeg -i input.wav -vn -ar 44100 -ac 2 -b:a 128k output.mp3
 

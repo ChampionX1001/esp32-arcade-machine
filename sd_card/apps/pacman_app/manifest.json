@@ -1,0 +1,7 @@
+{
+  "id": "pacman_app",
+  "name": "Pac-Man (App)",
+  "version": "0.1",
+  "path": "/games/pacman",
+  "description": "An app wrapper for the Pac-Man game, stored on the SD card as an app plugin."
+}

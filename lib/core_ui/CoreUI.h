@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <cstdint>
 
 // Platform abstraction interfaces
 struct Screen {
@@ -49,7 +50,8 @@ constexpr uint32_t COL_ORANGE = 0xFF8000;
 // Core UI logic — platform independent
 class CoreUI {
 public:
-  CoreUI(Screen *screen, Input *input, Sound *sound, FileSystem *fs, const std::string &sdRoot = "sd_card");
+  // pass optional sleep callback (ms) for embedded usage (e.g., delay)
+  CoreUI(Screen *screen, Input *input, Sound *sound, FileSystem *fs, const std::string &sdRoot = "sd_card", std::function<void(int)> sleeper = nullptr);
 
   // simple flows
   void showBoot(const std::string &bootPath);
@@ -59,6 +61,10 @@ public:
   // Pacman
   bool loadPacman(const std::string &path);
   void runPacman();
+
+  // allow host to populate menu (useful for embedded environments without nlohmann)
+  void clearMenu();
+  void addMenuItem(const std::string &id, const std::string &title, const std::string &path, const std::string &thumbnail = "");
 
   // helpers
   int getVolume() const { return _volume; }
@@ -88,4 +94,7 @@ private:
   void renderMenu(int sel);
   void renderPacmanFrame();
   void movePlayer(int dx, int dy);
+
+  // injected sleeper for embedded builds
+  std::function<void(int)> _sleeper;
 };

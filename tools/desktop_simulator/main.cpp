@@ -5,6 +5,8 @@
 #include <chrono>
 #include <thread>
 #include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 #include "CoreUI.h"
 

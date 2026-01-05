@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/GitHub/esp32-arcade-machine/tools/desktop_simulator/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

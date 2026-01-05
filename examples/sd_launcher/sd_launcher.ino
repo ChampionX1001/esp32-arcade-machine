@@ -147,20 +147,58 @@ void setup() {
   ui.waitForAnyButton();
 
   while (true) {
-    ui.mainMenu(MENU_PATH);
-    // Caller should handle launching games; for now we directly launch pacman if chosen
+    // Caller should handle launching games; menu will be shown below and selection returned
     // Load menu to check selection
     DynamicJsonDocument menuDoc(4096);
     if (!loadJsonFromSD(MENU_PATH, menuDoc)) continue;
+
+    // Detect apps in /apps and append them to the menu
+    if (SD.exists("/apps")) {
+      File appsDir = SD.open("/apps");
+      File entry = appsDir.openNextFile();
+      while (entry) {
+        if (entry.isDirectory()) {
+          String id = String(entry.name());
+          String manifest = String("/apps/") + id + "/manifest.json";
+          if (SD.exists(manifest.c_str())) {
+            DynamicJsonDocument appDoc(1024);
+            if (loadJsonFromSD(manifest.c_str(), appDoc)) {
+              JsonArray arr = menuDoc["menu"].as<JsonArray>();
+              JsonObject itm = arr.createNestedObject();
+              itm["id"] = appDoc["id"].as<const char*>();
+              itm["title"] = appDoc["name"].as<const char*>();
+              itm["path"] = String("/apps/") + appDoc["id"].as<const char*>();
+            }
+          }
+        }
+        entry = appsDir.openNextFile();
+      }
+      appsDir.close();
+    }
+
     JsonArray menu = menuDoc["menu"].as<JsonArray>();
-    // For demo: always launch pacman
+    // Ask UI for selected path (UI returns the selected path)
+    String selected = ui.mainMenu(MENU_PATH);
+    if (selected.length() == 0) { delay(200); continue; }
+
+    // Resolve apps -> target path
+    String targetPath = selected;
+    if (selected.startsWith("/apps/")) {
+      String manifest = selected + "/manifest.json";
+      DynamicJsonDocument appDoc(1024);
+      if (loadJsonFromSD(manifest.c_str(), appDoc) && appDoc.containsKey("path")) {
+        targetPath = String(appDoc["path"].as<const char*>());
+      }
+    }
+
+    // Basic launcher: if targetPath references pacman, launch the PacmanGame
     tft.fillScreen(TFT_BLACK);
     tft.setCursor(0,0);
-    tft.println("Loading Pac-Man...");
-    if (SD.exists("/games/pacman/manifest.json")) {
-      PacmanGame game(&tft, &mcp);
+    tft.println("Loading...");
+    if (targetPath.indexOf("pacman") >= 0 && SD.exists("/games/pacman/manifest.json")) {
+      PacmanGame game(&tft, &mcp, &dfplayer);
       game.loadFromSD("/games/pacman");
-      // give dfplayer track 002 as start sound
+      // play start track 002 on DFPlayer if available
       if (dfplayer.available()) dfplayer.play(2);
       game.run();
     }

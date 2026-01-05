@@ -1,0 +1,3 @@
+C:/GitHub/esp32-arcade-machine/tools/desktop_simulator/build/CMakeFiles/sim.dir
+C:/GitHub/esp32-arcade-machine/tools/desktop_simulator/build/CMakeFiles/edit_cache.dir
+C:/GitHub/esp32-arcade-machine/tools/desktop_simulator/build/CMakeFiles/rebuild_cache.dir

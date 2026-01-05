@@ -1,0 +1,1 @@
+-I"C:/GitHub/esp32-arcade-machine/tools/desktop_simulator/../../lib/core_ui" -I"C:/GitHub/esp32-arcade-machine/tools/desktop_simulator/../../lib/esp32_adapter" -isystem C:/msys64/mingw64/include/SDL2

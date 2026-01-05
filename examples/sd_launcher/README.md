@@ -19,7 +19,7 @@ Copy the contents of `sd_card/` to the root of your microSD card. Insert the car
 
 Notes & Extensibility
 - The pacman example uses an ASCII `level1.map`. You can add levels by creating more maps and adapting the `PacmanGame` class to load them.
-- Sounds are placeholders in `/sd_card/audio/`. Replace them with real MP3 files and update `games/*/sounds.json`.
+- DFPlayer audio files are stored on the DFPlayer device's own microSD card. Use the top-level `dfplayer/` placeholders as examples and copy those files (e.g., `002.mp3`, `003.mp3`) to your DFPlayer SD. Update `games/*/sounds.json` to map names to tracks if needed.
 - To implement firmware updates from SD: add a routine that looks for `/firmware/update.bin` and uses the `Update` API to write to flash.
 
 Running identical C++ tests on a PC

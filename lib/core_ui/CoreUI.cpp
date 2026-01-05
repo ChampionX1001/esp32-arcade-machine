@@ -3,10 +3,13 @@
 #include <algorithm>
 
 #include <nlohmann/json.hpp>
+#include <thread>
 using json = nlohmann::json;
 
-CoreUI::CoreUI(Screen *screen, Input *input, Sound *sound, FileSystem *fs, const std::string &sdRoot)
-  : _screen(screen), _input(input), _sound(sound), _fs(fs), _sdRoot(sdRoot) {}
+CoreUI::CoreUI(Screen *screen, Input *input, Sound *sound, FileSystem *fs, const std::string &sdRoot, std::function<void(int)> sleeper)
+  : _screen(screen), _input(input), _sound(sound), _fs(fs), _sdRoot(sdRoot) {
+  if (sleeper) _sleeper = sleeper; else _sleeper = [](int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
+}
 
 void CoreUI::showBoot(const std::string &bootPath) {
   std::string text;
@@ -34,18 +37,21 @@ void CoreUI::renderMenu(int sel) {
 }
 
 void CoreUI::mainMenu(const std::string &menuPath) {
-  // load menu JSON
+  // load menu JSON if present; otherwise rely on programmatically-populated _menuItems
   _menuItems.clear();
   std::string raw;
-  if (!_fs->readAll(menuPath, raw)) return;
-  auto j = json::parse(raw);
-  for (auto &it : j["menu"]) {
-    MenuItem mi;
-    mi.id = it.value("id", "");
-    mi.title = it.value("title", "");
-    mi.path = it.value("path", "");
-    mi.thumbnail = it.value("thumbnail", "");
-    _menuItems.push_back(mi);
+  if (_fs->readAll(menuPath, raw)) {
+    auto j = json::parse(raw);
+    for (auto &it : j["menu"]) {
+      MenuItem mi;
+      mi.id = it.value("id", "");
+      mi.title = it.value("title", "");
+      mi.path = it.value("path", "");
+      mi.thumbnail = it.value("thumbnail", "");
+      _menuItems.push_back(mi);
+    }
+  } else {
+    // keep existing _menuItems (possibly populated by host)
   }
 
   int sel = 0;
@@ -66,7 +72,7 @@ void CoreUI::mainMenu(const std::string &menuPath) {
     if (_input->btnB()) { return; }
 
     // tiny debounce / frame delay
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    _sleeper(50);
   }
 }
 
@@ -90,7 +96,7 @@ void CoreUI::settings() {
     if (_input->btnA()) { idx = (idx+1)%2; }
     if (_input->btnB()) { break; }
     if (_sound) _sound->playTrack(0);
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    _sleeper(80);
   }
 }
 
@@ -153,6 +159,12 @@ void CoreUI::runPacman() {
     if (_input->right()) movePlayer(+1, 0);
     if (_input->btnB()) { break; }
     renderPacmanFrame();
-    std::this_thread::sleep_for(100ms);
+    _sleeper(100);
   }
+}
+
+void CoreUI::clearMenu() { _menuItems.clear(); }
+
+void CoreUI::addMenuItem(const std::string &id, const std::string &title, const std::string &path, const std::string &thumbnail) {
+  MenuItem mi; mi.id = id; mi.title = title; mi.path = path; mi.thumbnail = thumbnail; _menuItems.push_back(mi);
 }

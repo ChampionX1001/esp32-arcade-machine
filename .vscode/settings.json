@@ -1,0 +1,22 @@
+{
+  "cmake.generator": "MinGW Makefiles",
+  "cmake.preferredGenerators": ["MinGW Makefiles", "Ninja"],
+  "cmake.buildDirectory": "${workspaceFolder}/tools/desktop_simulator/build",
+  "cmake.configureArgs": ["-DCMAKE_BUILD_TYPE=Debug"],
+  "cmake.configureEnvironment": {
+    "PATH": "${env:PATH};C:\\msys64\\mingw64\\bin"
+  },
+  "cmake.ctestArgs": [],
+  "cmake.configureOnOpen": false,
+  "terminal.integrated.profiles.windows": {
+    "MSYS2 MinGW64": {
+      "path": "C:\\msys64\\usr\\bin\\bash.exe",
+      "args": ["-lc"]
+    }
+  },
+  "terminal.integrated.defaultProfile.windows": "MSYS2 MinGW64",
+  "files.associations": {
+    "*.h": "c",
+    "*.hpp": "cpp"
+  }
+}
