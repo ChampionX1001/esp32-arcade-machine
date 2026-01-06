@@ -18,8 +18,24 @@ PNG png;
 #define FRAME_W 32
 #define FRAME_H 32
 
-uint16_t* pacFrames[MAX_FRAMES] = { nullptr }; 
+// Transparent color sentinel used when decoding PNGs (magenta in RGB565)
+const uint16_t TRANSPARENT_COLOR = 0xF81F;
+
+uint16_t* pacFrames[MAX_FRAMES] = { nullptr };
 int currentFrameIdx = 0;
+
+// Ghosts (four colors) loaded from LittleFS
+#define MAX_GHOSTS 4
+uint16_t* ghostBuffers[MAX_GHOSTS] = { nullptr };
+int ghostW[MAX_GHOSTS] = {0};
+int ghostH[MAX_GHOSTS] = {0};
+const char* ghostBaseNames[MAX_GHOSTS] = { "white", "red", "green", "blue" };
+
+// Temporary decode helpers used by the PNG callback
+#define MAX_PNG_LINE 320
+static uint16_t pngLineBuf[MAX_PNG_LINE];
+static uint16_t* pngDecodeDest = nullptr;
+static int pngDecodeDestW = 0;
 
 // Pacman game map
 const int cellSize = 16;
@@ -86,12 +102,78 @@ int32_t mySeek(PNGFILE *p, int32_t pos) { return pngFile.seek(pos); }
 // Change "void" to "int"
 int pngSliceCallback(PNGDRAW *pDraw) {
     uint16_t lineBuffer[FRAME_W * MAX_FRAMES];
-    png.getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_BIG_ENDIAN, 0x0000);
+    // Use TRANSPARENT_COLOR for alpha pixels (little-endian so values match CPU order)
+    png.getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_LITTLE_ENDIAN, TRANSPARENT_COLOR);
     
     for (int i = 0; i < MAX_FRAMES; i++) {
         memcpy(pacFrames[i] + (pDraw->y * FRAME_W), &lineBuffer[i * FRAME_W], FRAME_W * 2);
     }
     return 1; // Return 1 to continue decoding the next line
+}
+
+// Generic PNG callback that writes decoded RGB565 rows into the currently-selected destination buffer
+int pngGhostCallback(PNGDRAW *pDraw) {
+    if (!pngDecodeDest) return 0;
+    if (pDraw->iWidth > MAX_PNG_LINE) return 0; // too wide
+    // Use TRANSPARENT_COLOR for alpha pixels (little-endian so values match CPU order)
+    png.getLineAsRGB565(pDraw, pngLineBuf, PNG_RGB565_LITTLE_ENDIAN, TRANSPARENT_COLOR);
+    // Note: this PNGdec version exposes 'y' and 'iWidth' but not 'x', so assume x==0
+    int sx = 0;
+    int sy = pDraw->y;
+    for (int i = 0; i < pDraw->iWidth; ++i) {
+        pngDecodeDest[sy * pngDecodeDestW + sx + i] = pngLineBuf[i];
+    }
+    return 1;
+}
+
+// Decode a PNG at 'path' into an allocated RGB565 buffer (outBuf). Returns true on success.
+bool decodePNGToBuffer(const char* path, uint16_t** outBuf, int &outW, int &outH) {
+    if (!LittleFS.begin()) { Serial.println("LittleFS mount failed in decodePNGToBuffer"); return false; }
+    if (!LittleFS.exists(path)) { Serial.printf("PNG not found: %s\n", path); return false; }
+    if (png.open(path, myOpen, myClose, myRead, mySeek, pngGhostCallback) != PNG_SUCCESS) { Serial.printf("PNG open failed: %s\n", path); return false; }
+
+    outW = png.getWidth();
+    outH = png.getHeight();
+    // allocate buffer and zero it
+    *outBuf = (uint16_t*)malloc(outW * outH * 2);
+    if (!*outBuf) {
+        Serial.println("Out of memory allocating PNG buffer");
+        png.close();
+        return false;
+    }
+    // initialize to transparent sentinel
+    for (int k = 0; k < outW * outH; ++k) (*outBuf)[k] = TRANSPARENT_COLOR;
+
+    // Set global decode target for the callback
+    pngDecodeDest = *outBuf;
+    pngDecodeDestW = outW;
+
+    int ret = png.decode(NULL, 0);
+    if (ret != PNG_SUCCESS) {
+        Serial.printf("PNG decode failed (%d) for %s\n", ret, path);
+        free(*outBuf); *outBuf = nullptr; pngDecodeDest = nullptr; pngDecodeDestW = 0; png.close(); return false;
+    }
+
+    // reset decode target and close
+    pngDecodeDest = nullptr; pngDecodeDestW = 0; png.close();
+    Serial.printf("Decoded PNG %s -> %dx%d\n", path, outW, outH);
+    return true;
+}
+
+// Draw a decoded frame buffer to the TFT honoring TRANSPARENT_COLOR
+void drawFrameWithTransparency(uint16_t* buf, int fw, int fh, int sx, int sy) {
+    if (!buf) return;
+    for (int y = 0; y < fh; ++y) {
+        int ty = sy + y;
+        if (ty < 0 || ty >= tft.height()) continue;
+        for (int x = 0; x < fw; ++x) {
+            int tx = sx + x;
+            if (tx < 0 || tx >= tft.width()) continue;
+            uint16_t c = buf[y * fw + x];
+            if (c == TRANSPARENT_COLOR) continue;
+            tft.drawPixel(tx, ty, c);
+        }
+    }
 }
 
 void loadSpritesheet(const char* path) {
@@ -111,8 +193,10 @@ void loadSpritesheet(const char* path) {
     // Allocate RAM for frames and zero them to avoid showing uninitialized data
     for (int i = 0; i < MAX_FRAMES; i++) {
         pacFrames[i] = (uint16_t*)malloc(FRAME_W * FRAME_H * 2);
-        if (pacFrames[i]) memset(pacFrames[i], 0x00, FRAME_W * FRAME_H * 2);
-        else Serial.printf("Failed allocating frame %d\n", i);
+        if (pacFrames[i]) {
+            // initialize to transparent sentinel
+            for (int k = 0; k < FRAME_W * FRAME_H; ++k) pacFrames[i][k] = TRANSPARENT_COLOR;
+        } else Serial.printf("Failed allocating frame %d\n", i);
     }
 
     if (png.open(path, myOpen, myClose, myRead, mySeek, pngSliceCallback) == PNG_SUCCESS) {
@@ -143,6 +227,51 @@ void loadSpritesheet(const char* path) {
     }
 }
 
+// Try to locate and load the four ghost PNGs (white, red, green, blue)
+void loadGhosts() {
+    const char* candidatesFmt[] = { "/ghost_%s.png", "/%s.png", "/assets/ghost_%s.png", "/assets/%s.png" };
+    for (int g = 0; g < MAX_GHOSTS; ++g) {
+        char tryPath[64];
+        bool found = false;
+        for (auto &fmt : candidatesFmt) {
+            snprintf(tryPath, sizeof(tryPath), fmt, ghostBaseNames[g]);
+            if (LittleFS.exists(tryPath)) { found = true; break; }
+        }
+        if (!found) {
+            Serial.printf("Ghost PNG not found for %s\n", ghostBaseNames[g]);
+            continue;
+        }
+        Serial.printf("Loading ghost PNG %s\n", tryPath);
+        int w = 0, h = 0;
+        if (decodePNGToBuffer(tryPath, &ghostBuffers[g], w, h)) {
+            ghostW[g] = w; ghostH[g] = h;
+            Serial.printf("Loaded ghost %s -> %dx%d\n", ghostBaseNames[g], w, h);
+        } else {
+            Serial.printf("Failed to decode ghost %s\n", ghostBaseNames[g]);
+            ghostBuffers[g] = nullptr; ghostW[g] = ghostH[g] = 0;
+        }
+    }
+}
+
+// Render the four ghosts in the central 2x2 box of the map
+void renderGhostsInCenter() {
+    int baseX = (mapWidth / 2) - 1; // left column of central 2x2
+    int baseY = (mapHeight / 2) - 1; // top row of central 2x2
+    for (int g = 0; g < MAX_GHOSTS; ++g) {
+        int gx = baseX + (g % 2);
+        int gy = baseY + (g / 2);
+        if (!ghostBuffers[g]) continue;
+        int w = ghostW[g]; int h = ghostH[g];
+        int sx = gx * cellSize + (cellSize - w) / 2;
+        int sy = gy * cellSize + (cellSize - h) / 2 + pelletDiameter;
+        // clamp
+        if (sx < 0) sx = 0;
+        if (sy < 0) sy = 0;
+        // Draw while honoring transparency
+        drawFrameWithTransparency(ghostBuffers[g], w, h, sx, sy);
+    }
+}
+
 // Draw the static map once (walls and pellets)
 void drawMapOnce() {
     tft.fillScreen(TFT_BLACK);
@@ -158,6 +287,9 @@ void drawMapOnce() {
             }
         }
     }
+
+    // Draw the ghosts in the central box
+    renderGhostsInCenter();
 }
 
 void drawGame() {
@@ -263,18 +395,17 @@ void drawGame() {
     int sx = pacmanX * cellSize + (cellSize - FRAME_W) / 2;
     int sy = pacmanY * cellSize + (cellSize - FRAME_H) / 2 + pelletDiameter;
 
-    // Render current frame (or fallback) into the pacSprite and push to screen
-    pacSprite.fillSprite(TFT_BLACK);
+    // Render current frame (or fallback) to the display, honoring transparency
     if (pacFrames[currentFrameIdx]) {
-        pacSprite.pushImage(0, 0, FRAME_W, FRAME_H, pacFrames[currentFrameIdx]);
+        drawFrameWithTransparency(pacFrames[currentFrameIdx], FRAME_W, FRAME_H, sx, sy);
     } else {
-        // fallback procedural: large pacman
+        // fallback procedural: draw into sprite and push
+        pacSprite.fillSprite(TFT_BLACK);
         int r = min(FRAME_W, FRAME_H) / 2 - 2;
         pacSprite.fillCircle(FRAME_W/2, FRAME_H/2, r, TFT_YELLOW);
         pacSprite.fillCircle(FRAME_W/2 + 4, FRAME_H/2 - 6, 2, TFT_BLACK);
+        pacSprite.pushSprite(sx, sy);
     }
-    // Push the finalized sprite to the display
-    pacSprite.pushSprite(sx, sy);
 
     prevPacX = pacmanX;
     prevPacY = pacmanY;
@@ -380,6 +511,10 @@ void setup() {
     
     // Create the rendering sprite
     pacSprite.createSprite(FRAME_W, FRAME_H);
+
+    // Load ghosts from LittleFS (white, red, green, blue)
+    loadGhosts();
+
     showStartScreen();
 
     // Touch diagnostics: check IRQ pin and poll getTouch()
