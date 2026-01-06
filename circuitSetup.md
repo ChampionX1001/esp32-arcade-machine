@@ -18,3 +18,11 @@ DFPlayer Mini: Conntected to Hosyond board's UART Serial Port
 
 DFPlayer Mini has an SD card with all of the project's WAV audio files.
 These files are named by the description of their sound. For example, "<b>pacman_eat.wav</b>".
+
+## Input
+
+
+
+## Output
+
+There is WS2812B LED light strip in the circuit, with 144 LEDs in series. The Data In cable for the LED strip is connected to GPIO 23 (MOSI) of Hosyond board.
