@@ -17,6 +17,7 @@ PNG png;
 #define MAX_FRAMES 14
 #define FRAME_W 32
 #define FRAME_H 32
+#define PACMAN_FRAME_COUNT 6
 
 // Transparent color sentinel used when decoding PNGs (magenta in RGB565)
 const uint16_t TRANSPARENT_COLOR = 0xF81F;
@@ -24,12 +25,13 @@ const uint16_t TRANSPARENT_COLOR = 0xF81F;
 uint16_t* pacFrames[MAX_FRAMES] = { nullptr };
 int currentFrameIdx = 0;
 
-// Ghosts (four colors) loaded from LittleFS
+// Ghosts (four colors) loaded from LittleFS (explicit filenames)
 #define MAX_GHOSTS 4
 uint16_t* ghostBuffers[MAX_GHOSTS] = { nullptr };
 int ghostW[MAX_GHOSTS] = {0};
 int ghostH[MAX_GHOSTS] = {0};
-const char* ghostBaseNames[MAX_GHOSTS] = { "white", "red", "green", "blue" };
+// User-specified filenames (case preserved) that should be placed into the LittleFS data folder
+const char* ghostFileNames[MAX_GHOSTS] = { "BlueGhost.png", "RedGhost.png", "WhiteGhost.png", "GreenGhost.png"};
 
 // Temporary decode helpers used by the PNG callback
 #define MAX_PNG_LINE 320
@@ -101,11 +103,12 @@ int32_t mySeek(PNGFILE *p, int32_t pos) { return pngFile.seek(pos); }
 // Callback: Slices the horizontal sheet into 14 RAM buffers
 // Change "void" to "int"
 int pngSliceCallback(PNGDRAW *pDraw) {
-    uint16_t lineBuffer[FRAME_W * MAX_FRAMES];
-    // Use TRANSPARENT_COLOR for alpha pixels (little-endian so values match CPU order)
+    uint16_t lineBuffer[FRAME_W * PACMAN_FRAME_COUNT];
+    // Use TRANSPARENT_COLOR for alpha pixels
     png.getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_LITTLE_ENDIAN, TRANSPARENT_COLOR);
-    
-    for (int i = 0; i < MAX_FRAMES; i++) {
+
+    // Copy only the first PACMAN_FRAME_COUNT frames into pacFrames[0..PACMAN_FRAME_COUNT-1]
+    for (int i = 0; i < PACMAN_FRAME_COUNT; i++) {
         memcpy(pacFrames[i] + (pDraw->y * FRAME_W), &lineBuffer[i * FRAME_W], FRAME_W * 2);
     }
     return 1; // Return 1 to continue decoding the next line
@@ -229,25 +232,43 @@ void loadSpritesheet(const char* path) {
 
 // Try to locate and load the four ghost PNGs (white, red, green, blue)
 void loadGhosts() {
-    const char* candidatesFmt[] = { "/ghost_%s.png", "/%s.png", "/assets/ghost_%s.png", "/assets/%s.png" };
+    // Ensure LittleFS is mounted before checking existence
+    if (!LittleFS.begin()) {
+        Serial.println("LittleFS mount failed in loadGhosts — attempting format...");
+        if (LittleFS.format()) {
+            Serial.println("LittleFS format succeeded, retrying mount...");
+            if (!LittleFS.begin()) { Serial.println("LittleFS mount still failed in loadGhosts"); return; }
+        } else {
+            Serial.println("LittleFS format failed in loadGhosts"); return;
+        }
+    }
+
+    const char* tryPatterns[] = {"/%s", "/assets/%s", "/%s", "/assets/%s" };
     for (int g = 0; g < MAX_GHOSTS; ++g) {
-        char tryPath[64];
+        char tryPath[96];
         bool found = false;
-        for (auto &fmt : candidatesFmt) {
-            snprintf(tryPath, sizeof(tryPath), fmt, ghostBaseNames[g]);
+        // Try exact filename first, then lowercased variant, and in /assets/
+        for (auto &pat : tryPatterns) {
+            snprintf(tryPath, sizeof(tryPath), pat, ghostFileNames[g]);
+            if (LittleFS.exists(tryPath)) { found = true; break; }
+            // lowercased name
+            char lower[64]; strncpy(lower, ghostFileNames[g], sizeof(lower)-1); lower[sizeof(lower)-1]=0;
+            for (char *p = lower; *p; ++p) *p = tolower(*p);
+            snprintf(tryPath, sizeof(tryPath), pat, lower);
             if (LittleFS.exists(tryPath)) { found = true; break; }
         }
         if (!found) {
-            Serial.printf("Ghost PNG not found for %s\n", ghostBaseNames[g]);
+            Serial.printf("Ghost PNG not found for %s\n", ghostFileNames[g]);
+            ghostBuffers[g] = nullptr; ghostW[g] = ghostH[g] = 0;
             continue;
         }
         Serial.printf("Loading ghost PNG %s\n", tryPath);
         int w = 0, h = 0;
         if (decodePNGToBuffer(tryPath, &ghostBuffers[g], w, h)) {
             ghostW[g] = w; ghostH[g] = h;
-            Serial.printf("Loaded ghost %s -> %dx%d\n", ghostBaseNames[g], w, h);
+            Serial.printf("Loaded ghost %s -> %dx%d\n", ghostFileNames[g], w, h);
         } else {
-            Serial.printf("Failed to decode ghost %s\n", ghostBaseNames[g]);
+            Serial.printf("Failed to decode ghost %s\n", ghostFileNames[g]);
             ghostBuffers[g] = nullptr; ghostW[g] = ghostH[g] = 0;
         }
     }
@@ -257,18 +278,32 @@ void loadGhosts() {
 void renderGhostsInCenter() {
     int baseX = (mapWidth / 2) - 1; // left column of central 2x2
     int baseY = (mapHeight / 2) - 1; // top row of central 2x2
+    const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_BLUE };
+
     for (int g = 0; g < MAX_GHOSTS; ++g) {
         int gx = baseX + (g % 2);
         int gy = baseY + (g / 2);
-        if (!ghostBuffers[g]) continue;
-        int w = ghostW[g]; int h = ghostH[g];
-        int sx = gx * cellSize + (cellSize - w) / 2;
-        int sy = gy * cellSize + (cellSize - h) / 2 + pelletDiameter;
-        // clamp
-        if (sx < 0) sx = 0;
-        if (sy < 0) sy = 0;
-        // Draw while honoring transparency
-        drawFrameWithTransparency(ghostBuffers[g], w, h, sx, sy);
+        int sx = gx * cellSize + 2; // small inset
+        int sy = gy * cellSize + 2 + pelletDiameter;
+
+        if (ghostBuffers[g]) {
+            int w = ghostW[g]; int h = ghostH[g];
+            int d_sx = gx * cellSize + (cellSize - w) / 2;
+            int d_sy = gy * cellSize + (cellSize - h) / 2 + pelletDiameter;
+            if (d_sx < 0) d_sx = 0;
+            if (d_sy < 0) d_sy = 0;
+            drawFrameWithTransparency(ghostBuffers[g], w, h, d_sx, d_sy);
+        } else {
+            // Fallback: draw a simple circular ghost-shaped blob
+            Serial.printf("Drawing fallback ghost for %s\n", ghostFileNames[g]);
+            int radius = (cellSize - 4) / 2;
+            int cx = sx + radius;
+            int cy = sy + radius;
+            tft.fillCircle(cx, cy, radius, fallbackColor[g]);
+            // eyes
+            tft.fillCircle(cx - radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
+            tft.fillCircle(cx + radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
+        }
     }
 }
 
@@ -387,7 +422,7 @@ void drawGame() {
     // Update animation frame index
     pacAnimCounter++;
     if (pacAnimCounter >= pacAnimThreshold) {
-        currentFrameIdx = (currentFrameIdx + 1) % MAX_FRAMES;
+        currentFrameIdx = (currentFrameIdx + 1) % PACMAN_FRAME_COUNT;
         pacAnimCounter = 0;
     }
 
