@@ -22,6 +22,14 @@ const int pelletYOffset = -2;
 const int pacmanRadius = 5;
 int pacmanX = 1, pacmanY = 1, dirX = 0, dirY = 0;
 int prevPacX = -1, prevPacY = -1; // previous Pacman position (for selective redraw)
+
+// Sprite animation state
+TFT_eSprite pacSprite = TFT_eSprite(&tft);
+const int pacSpriteSize = 14; // pixels
+int pacAnimCounter = 0;
+const int pacAnimThreshold = 3; // lower = faster animation
+bool pacMouthOpen = true;
+int lastDirX = 1, lastDirY = 0; // last non-zero direction (defaults right)
 int gameMap[mapHeight][mapWidth] = {
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
     {1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1},
@@ -69,7 +77,16 @@ void drawGame() {
     // If this is the first draw after starting, draw the full map and place Pacman
     if (prevPacX == -1) {
         drawMapOnce();
-        tft.fillCircle(pacmanX * cellSize + cellSize / 2, pacmanY * cellSize + cellSize / 2, pacmanRadius, TFT_YELLOW);
+        // Draw Pacman sprite for the first frame
+        int sx = pacmanX * cellSize + (cellSize - pacSpriteSize) / 2;
+        int sy = pacmanY * cellSize + (cellSize - pacSpriteSize) / 2;
+        pacSprite.fillSprite(TFT_BLACK);
+        // simple animated radius to mimic sprite frames
+        int r = pacmanRadius + (pacMouthOpen ? 1 : 0);
+        pacSprite.fillCircle(pacSpriteSize/2, pacSpriteSize/2, r, TFT_YELLOW);
+        // small eye
+        pacSprite.fillCircle(pacSpriteSize/2 + 2, pacSpriteSize/2 - 3, 1, TFT_BLACK);
+        pacSprite.pushSprite(sx, sy);
         prevPacX = pacmanX;
         prevPacY = pacmanY;
         return;
@@ -90,8 +107,32 @@ void drawGame() {
         }
     }
 
-    // Draw Pacman at the new position
-    tft.fillCircle(pacmanX * cellSize + cellSize / 2, pacmanY * cellSize + cellSize / 2, pacmanRadius, TFT_YELLOW);
+    // Draw Pacman at the new position using a sprite
+    pacAnimCounter++;
+    if (pacAnimCounter >= pacAnimThreshold) { pacMouthOpen = !pacMouthOpen; pacAnimCounter = 0; }
+    int sx = pacmanX * cellSize + (cellSize - pacSpriteSize) / 2;
+    int sy = pacmanY * cellSize + (cellSize - pacSpriteSize) / 2;
+    pacSprite.fillSprite(TFT_BLACK);
+    int r = pacmanRadius + (pacMouthOpen ? 1 : 0);
+    pacSprite.fillCircle(pacSpriteSize/2, pacSpriteSize/2, r, TFT_YELLOW);
+    // draw directional mouth when open
+    if (pacMouthOpen) {
+        int cx = pacSpriteSize/2;
+        int cy = pacSpriteSize/2;
+        int tri = r; // mouth size
+        if (lastDirX > 0) { // right
+            pacSprite.fillTriangle(cx + tri, cy, cx - tri/2, cy - tri/2, cx - tri/2, cy + tri/2, TFT_BLACK);
+        } else if (lastDirX < 0) { // left
+            pacSprite.fillTriangle(cx - tri, cy, cx + tri/2, cy - tri/2, cx + tri/2, cy + tri/2, TFT_BLACK);
+        } else if (lastDirY < 0) { // up
+            pacSprite.fillTriangle(cx, cy - tri, cx - tri/2, cy + tri/2, cx + tri/2, cy + tri/2, TFT_BLACK);
+        } else if (lastDirY > 0) { // down
+            pacSprite.fillTriangle(cx, cy + tri, cx - tri/2, cy - tri/2, cx + tri/2, cy - tri/2, TFT_BLACK);
+        }
+    }
+    // eye
+    pacSprite.fillCircle(pacSpriteSize/2 + 2, pacSpriteSize/2 - 3, 1, TFT_BLACK);
+    pacSprite.pushSprite(sx, sy);
 
     // Remember current as previous for next iteration
     prevPacX = pacmanX;
@@ -128,6 +169,8 @@ void updateGame() {
     int newX = pacmanX + dirX;
     int newY = pacmanY + dirY;
     if (gameMap[newY][newX] != 1) {
+        // Update last direction if movement occurs
+        if (dirX != 0 || dirY != 0) { lastDirX = dirX; lastDirY = dirY; }
         pacmanX = newX;
         pacmanY = newY;
         if (gameMap[pacmanY][pacmanX] == 2) {
@@ -150,7 +193,10 @@ void setup() {
     Serial.println("TFT is initialized");
     tft.init(); // Initialize with ST7796 driver
     tft.setRotation(1);
- 
+
+    // Create Pacman sprite
+    pacSprite.createSprite(pacSpriteSize, pacSpriteSize);
+
     // Diagnostic prints
    // Serial.print("TFT width="); Serial.print(tft.width());
     //Serial.print(" height="); Serial.println(tft.height());
