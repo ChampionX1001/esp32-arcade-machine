@@ -17,7 +17,9 @@ const int cellSize = 16;
 const int mapWidth = 30;
 const int mapHeight = 20;
 // shift pellets down a bit inside each cell (pixels)
-const int pelletYOffset = -3;
+const int pelletYOffset = -2;
+// Pacman rendering radius (smaller than half-cell)
+const int pacmanRadius = 5;
 int pacmanX = 1, pacmanY = 1, dirX = 0, dirY = 0;
 int prevPacX = -1, prevPacY = -1; // previous Pacman position (for selective redraw)
 int gameMap[mapHeight][mapWidth] = {
@@ -67,7 +69,7 @@ void drawGame() {
     // If this is the first draw after starting, draw the full map and place Pacman
     if (prevPacX == -1) {
         drawMapOnce();
-        tft.fillCircle(pacmanX * cellSize + cellSize / 2, pacmanY * cellSize + cellSize / 2, cellSize / 2, TFT_YELLOW);
+        tft.fillCircle(pacmanX * cellSize + cellSize / 2, pacmanY * cellSize + cellSize / 2, pacmanRadius, TFT_YELLOW);
         prevPacX = pacmanX;
         prevPacY = pacmanY;
         return;
@@ -89,7 +91,7 @@ void drawGame() {
     }
 
     // Draw Pacman at the new position
-    tft.fillCircle(pacmanX * cellSize + cellSize / 2, pacmanY * cellSize + cellSize / 2, cellSize / 2, TFT_YELLOW);
+    tft.fillCircle(pacmanX * cellSize + cellSize / 2, pacmanY * cellSize + cellSize / 2, pacmanRadius, TFT_YELLOW);
 
     // Remember current as previous for next iteration
     prevPacX = pacmanX;
@@ -148,34 +150,27 @@ void setup() {
     Serial.println("TFT is initialized");
     tft.init(); // Initialize with ST7796 driver
     tft.setRotation(1);
-    // Quick color test to verify display commands reach the panel
-    tft.fillScreen(TFT_RED);
-    delay(300);
-    tft.fillScreen(TFT_GREEN);
-    delay(300);
-    tft.fillScreen(TFT_BLUE);
-    delay(300);
-
+ 
     // Diagnostic prints
-    Serial.print("TFT width="); Serial.print(tft.width());
-    Serial.print(" height="); Serial.println(tft.height());
+   // Serial.print("TFT width="); Serial.print(tft.width());
+    //Serial.print(" height="); Serial.println(tft.height());
 
     // Print the pin macros from User_Setup.h for verification
-    Serial.print("TFT pins MOSI="); Serial.print(TFT_MOSI);
-    Serial.print(" SCLK="); Serial.print(TFT_SCLK);
-    Serial.print(" MISO="); Serial.print(TFT_MISO);
-    Serial.print(" CS="); Serial.print(TFT_CS);
-    Serial.print(" DC="); Serial.print(TFT_DC);
-    Serial.print(" BL="); Serial.println(TFT_BL);
+   // Serial.print("TFT pins MOSI="); Serial.print(TFT_MOSI);
+   // Serial.print(" SCLK="); Serial.print(TFT_SCLK);
+    //Serial.print(" MISO="); Serial.print(TFT_MISO);
+    //Serial.print(" CS="); Serial.print(TFT_CS);
+   // Serial.print(" DC="); Serial.print(TFT_DC);
+   // Serial.print(" BL="); Serial.println(TFT_BL);
 
     // Draw a center pixel and a small rect to check drawing commands
-    int cx = tft.width() / 2;
-    int cy = tft.height() / 2;
-    Serial.print("Drawing center pixel at "); Serial.print(cx); Serial.print(","); Serial.println(cy);
-    tft.drawPixel(cx, cy, TFT_WHITE);
-    delay(200);
-    tft.fillRect(cx - 30, cy - 20, 60, 40, TFT_YELLOW);
-    delay(500);
+    //int cx = tft.width() / 2;
+   // int cy = tft.height() / 2;
+  //  Serial.print("Drawing center pixel at "); Serial.print(cx); Serial.print(","); Serial.println(cy);
+  //  tft.drawPixel(cx, cy, TFT_WHITE);
+  //  delay(200);
+  //  tft.fillRect(cx - 30, cy - 20, 60, 40, TFT_YELLOW);
+  //  delay(500);
 
     // Toggle backlight to verify polarity (GPIO27 used as BL on this board)
     pinMode(27, OUTPUT);
@@ -192,8 +187,8 @@ void setup() {
     delay(200);
     
     // Draw a small test rectangle to check drawing commands
-    tft.fillRect(10, 10, 100, 50, TFT_YELLOW);
-    delay(1000);
+   // tft.fillRect(10, 10, 100, 50, TFT_YELLOW);
+    //delay(1000);
 
     showStartScreen();
 
