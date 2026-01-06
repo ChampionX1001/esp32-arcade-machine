@@ -16,7 +16,10 @@ Audio audio;
 const int cellSize = 16;
 const int mapWidth = 30;
 const int mapHeight = 20;
+// shift pellets down a bit inside each cell (pixels)
+const int pelletYOffset = -3;
 int pacmanX = 1, pacmanY = 1, dirX = 0, dirY = 0;
+int prevPacX = -1, prevPacY = -1; // previous Pacman position (for selective redraw)
 int gameMap[mapHeight][mapWidth] = {
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
     {1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1},
@@ -43,7 +46,9 @@ int gameMap[mapHeight][mapWidth] = {
 // Game state
 bool gameStarted = false;
 
-void drawGame() {
+// Draw the static map once (walls and pellets)
+void drawMapOnce() {
+    tft.fillScreen(TFT_BLACK);
     for (int y = 0; y < mapHeight; ++y) {
         for (int x = 0; x < mapWidth; ++x) {
             int px = x * cellSize;
@@ -52,12 +57,43 @@ void drawGame() {
                 tft.fillRect(px, py, cellSize, cellSize, TFT_BLUE);
             }
             else if (gameMap[y][x] == 2) {
-                tft.fillCircle(px + cellSize / 2, py + cellSize / 2, 2, TFT_YELLOW);
+                tft.fillCircle(px + cellSize / 2, py + cellSize / 2 + pelletYOffset, 2, TFT_YELLOW);
             }
         }
     }
-    // Draw Pacman
+}
+
+void drawGame() {
+    // If this is the first draw after starting, draw the full map and place Pacman
+    if (prevPacX == -1) {
+        drawMapOnce();
+        tft.fillCircle(pacmanX * cellSize + cellSize / 2, pacmanY * cellSize + cellSize / 2, cellSize / 2, TFT_YELLOW);
+        prevPacX = pacmanX;
+        prevPacY = pacmanY;
+        return;
+    }
+
+    // Erase Pacman's previous position by redrawing that cell based on the map
+    if (prevPacX != pacmanX || prevPacY != pacmanY) {
+        int px = prevPacX * cellSize;
+        int py = prevPacY * cellSize;
+        int cell = gameMap[prevPacY][prevPacX];
+        if (cell == 1) {
+            tft.fillRect(px, py, cellSize, cellSize, TFT_BLUE);
+        } else if (cell == 2) {
+            tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
+            tft.fillCircle(px + cellSize / 2, py + cellSize / 2 + pelletYOffset, 2, TFT_YELLOW);
+        } else {
+            tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
+        }
+    }
+
+    // Draw Pacman at the new position
     tft.fillCircle(pacmanX * cellSize + cellSize / 2, pacmanY * cellSize + cellSize / 2, cellSize / 2, TFT_YELLOW);
+
+    // Remember current as previous for next iteration
+    prevPacX = pacmanX;
+    prevPacY = pacmanY;
 }
 
 void showStartScreen() {
@@ -94,6 +130,10 @@ void updateGame() {
         pacmanY = newY;
         if (gameMap[pacmanY][pacmanX] == 2) {
             gameMap[pacmanY][pacmanX] = 0;
+            // Erase the pellet immediately so it disappears when Pacman eats it
+            int px = pacmanX * cellSize;
+            int py = pacmanY * cellSize;
+            tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
             playWav("/PacManLittleDot.wav");
         }
     }
@@ -211,7 +251,9 @@ void loop() {
         Serial.println("Waiting for touch to start the game...");
         if (touched) {
             gameStarted = true;
-            tft.fillScreen(TFT_BLACK);
+            // Draw full static map once and then draw Pacman
+            drawMapOnce();
+            prevPacX = -1; // signal drawGame() to perform first-draw path
             drawGame();
             delay(200);
         } else {
