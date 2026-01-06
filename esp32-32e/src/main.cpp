@@ -6,38 +6,21 @@
 #include <SD.h>
 #include <FS.h>
 #include <LittleFS.h>
-#include <PNGdec.h>
+
 
 // Pin definitions (adjust for your board)
 #define SD_CS 5
 
 TFT_eSPI tft = TFT_eSPI();
 Audio audio;
-PNG png;
-#define MAX_FRAMES 14
+
 #define FRAME_W 32
 #define FRAME_H 32
-#define PACMAN_FRAME_COUNT 6
 
-// Transparent color sentinel used when decoding PNGs (magenta in RGB565)
-const uint16_t TRANSPARENT_COLOR = 0xF81F;
+// Pacman will be drawn procedurally as a yellow circle (no PNGs)
 
-uint16_t* pacFrames[MAX_FRAMES] = { nullptr };
-int currentFrameIdx = 0;
-
-// Ghosts (four colors) loaded from LittleFS (explicit filenames)
 #define MAX_GHOSTS 4
-uint16_t* ghostBuffers[MAX_GHOSTS] = { nullptr };
-int ghostW[MAX_GHOSTS] = {0};
-int ghostH[MAX_GHOSTS] = {0};
-// User-specified filenames (case preserved) that should be placed into the LittleFS data folder
-const char* ghostFileNames[MAX_GHOSTS] = { "BlueGhost.png", "RedGhost.png", "WhiteGhost.png", "GreenGhost.png"};
-
-// Temporary decode helpers used by the PNG callback
-#define MAX_PNG_LINE 320
-static uint16_t pngLineBuf[MAX_PNG_LINE];
-static uint16_t* pngDecodeDest = nullptr;
-static int pngDecodeDestW = 0;
+const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_BLUE };
 
 // Pacman game map
 const int cellSize = 16;
@@ -50,7 +33,7 @@ const int pelletRadius = 2;
 const int pelletDiameter = pelletRadius * 2;
 
 // Pacman rendering radius (smaller than half-cell)
-const int pacmanRadius = 5;
+const int pacmanRadius = 16;
 int pacmanX = 1, pacmanY = 1, dirX = 0, dirY = 0;
 int prevPacX = -1, prevPacY = -1; // previous Pacman position (for selective redraw)
 
@@ -87,192 +70,14 @@ int gameMap[mapHeight][mapWidth] = {
 // Game state
 bool gameStarted = false;
 
-// LittleFS Wrapper Functions for PNGdec
-File pngFile;
-void * myOpen(const char *f, int32_t *s) { 
-    pngFile = LittleFS.open(f, "r"); 
-    if (!pngFile) return NULL;
-    *s = pngFile.size(); 
-    return &pngFile; 
-}
+// PNG file wrapper removed (no PNGs used)
 
-void myClose(void *h) { if (pngFile) pngFile.close(); }
-int32_t myRead(PNGFILE *p, uint8_t *b, int32_t l) { return pngFile.read(b, l); }
-int32_t mySeek(PNGFILE *p, int32_t pos) { return pngFile.seek(pos); }
+// PNG decoding callbacks removed (no PNGs used)
 
-// Callback: Slices the horizontal sheet into 14 RAM buffers
-// Change "void" to "int"
-int pngSliceCallback(PNGDRAW *pDraw) {
-    uint16_t lineBuffer[FRAME_W * PACMAN_FRAME_COUNT];
-    // Use TRANSPARENT_COLOR for alpha pixels
-    png.getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_LITTLE_ENDIAN, TRANSPARENT_COLOR);
-
-    // Copy only the first PACMAN_FRAME_COUNT frames into pacFrames[0..PACMAN_FRAME_COUNT-1]
-    for (int i = 0; i < PACMAN_FRAME_COUNT; i++) {
-        memcpy(pacFrames[i] + (pDraw->y * FRAME_W), &lineBuffer[i * FRAME_W], FRAME_W * 2);
-    }
-    return 1; // Return 1 to continue decoding the next line
-}
-
-// Generic PNG callback that writes decoded RGB565 rows into the currently-selected destination buffer
-int pngGhostCallback(PNGDRAW *pDraw) {
-    if (!pngDecodeDest) return 0;
-    if (pDraw->iWidth > MAX_PNG_LINE) return 0; // too wide
-    // Use TRANSPARENT_COLOR for alpha pixels (little-endian so values match CPU order)
-    png.getLineAsRGB565(pDraw, pngLineBuf, PNG_RGB565_LITTLE_ENDIAN, TRANSPARENT_COLOR);
-    // Note: this PNGdec version exposes 'y' and 'iWidth' but not 'x', so assume x==0
-    int sx = 0;
-    int sy = pDraw->y;
-    for (int i = 0; i < pDraw->iWidth; ++i) {
-        pngDecodeDest[sy * pngDecodeDestW + sx + i] = pngLineBuf[i];
-    }
-    return 1;
-}
-
-// Decode a PNG at 'path' into an allocated RGB565 buffer (outBuf). Returns true on success.
-bool decodePNGToBuffer(const char* path, uint16_t** outBuf, int &outW, int &outH) {
-    if (!LittleFS.begin()) { Serial.println("LittleFS mount failed in decodePNGToBuffer"); return false; }
-    if (!LittleFS.exists(path)) { Serial.printf("PNG not found: %s\n", path); return false; }
-    if (png.open(path, myOpen, myClose, myRead, mySeek, pngGhostCallback) != PNG_SUCCESS) { Serial.printf("PNG open failed: %s\n", path); return false; }
-
-    outW = png.getWidth();
-    outH = png.getHeight();
-    // allocate buffer and zero it
-    *outBuf = (uint16_t*)malloc(outW * outH * 2);
-    if (!*outBuf) {
-        Serial.println("Out of memory allocating PNG buffer");
-        png.close();
-        return false;
-    }
-    // initialize to transparent sentinel
-    for (int k = 0; k < outW * outH; ++k) (*outBuf)[k] = TRANSPARENT_COLOR;
-
-    // Set global decode target for the callback
-    pngDecodeDest = *outBuf;
-    pngDecodeDestW = outW;
-
-    int ret = png.decode(NULL, 0);
-    if (ret != PNG_SUCCESS) {
-        Serial.printf("PNG decode failed (%d) for %s\n", ret, path);
-        free(*outBuf); *outBuf = nullptr; pngDecodeDest = nullptr; pngDecodeDestW = 0; png.close(); return false;
-    }
-
-    // reset decode target and close
-    pngDecodeDest = nullptr; pngDecodeDestW = 0; png.close();
-    Serial.printf("Decoded PNG %s -> %dx%d\n", path, outW, outH);
-    return true;
-}
+// PNG decoding helper removed (no PNGs used)
 
 // Draw a decoded frame buffer to the TFT honoring TRANSPARENT_COLOR
-void drawFrameWithTransparency(uint16_t* buf, int fw, int fh, int sx, int sy) {
-    if (!buf) return;
-    for (int y = 0; y < fh; ++y) {
-        int ty = sy + y;
-        if (ty < 0 || ty >= tft.height()) continue;
-        for (int x = 0; x < fw; ++x) {
-            int tx = sx + x;
-            if (tx < 0 || tx >= tft.width()) continue;
-            uint16_t c = buf[y * fw + x];
-            if (c == TRANSPARENT_COLOR) continue;
-            tft.drawPixel(tx, ty, c);
-        }
-    }
-}
-
-void loadSpritesheet(const char* path) {
-   // Attempt to mount LittleFS; try formatting if mount fails
-   if (!LittleFS.begin()) {
-      Serial.println("LittleFS mount failed — attempting format...");
-      if (LittleFS.format()) {
-        Serial.println("LittleFS format succeeded, retrying mount...");
-        if (LittleFS.begin()) Serial.println("LittleFS mounted after format");
-        else Serial.println("Mount still failed after format");
-      } else {
-        Serial.println("LittleFS format failed");
-        return;
-      }
-   }
-
-    // Allocate RAM for frames and zero them to avoid showing uninitialized data
-    for (int i = 0; i < MAX_FRAMES; i++) {
-        pacFrames[i] = (uint16_t*)malloc(FRAME_W * FRAME_H * 2);
-        if (pacFrames[i]) {
-            // initialize to transparent sentinel
-            for (int k = 0; k < FRAME_W * FRAME_H; ++k) pacFrames[i][k] = TRANSPARENT_COLOR;
-        } else Serial.printf("Failed allocating frame %d\n", i);
-    }
-
-    if (png.open(path, myOpen, myClose, myRead, mySeek, pngSliceCallback) == PNG_SUCCESS) {
-        int sheetW = png.getWidth();
-        int sheetH = png.getHeight();
-        if (sheetW < FRAME_W * MAX_FRAMES || sheetH < FRAME_H) {
-            Serial.printf("Spritesheet unexpected size: %dx%d (need >= %dx%d)\n", sheetW, sheetH, FRAME_W * MAX_FRAMES, FRAME_H);
-            png.close();
-            for (int i = 0; i < MAX_FRAMES; i++) { free(pacFrames[i]); pacFrames[i] = nullptr; }
-            return;
-        }
-
-        int ret = png.decode(NULL, 0);
-        if (ret != PNG_SUCCESS) {
-            Serial.printf("PNG decode failed: %d\n", ret);
-            png.close();
-            for (int i = 0; i < MAX_FRAMES; i++) { free(pacFrames[i]); pacFrames[i] = nullptr; }
-            return;
-        }
-
-        png.close();
-        Serial.println("Spritesheet loaded from Flash to RAM");
-        return;
-    } else {
-        Serial.println("PNG open failed");
-        for (int i = 0; i < MAX_FRAMES; i++) { free(pacFrames[i]); pacFrames[i] = nullptr; }
-        return;
-    }
-}
-
-// Try to locate and load the four ghost PNGs (white, red, green, blue)
-void loadGhosts() {
-    // Ensure LittleFS is mounted before checking existence
-    if (!LittleFS.begin()) {
-        Serial.println("LittleFS mount failed in loadGhosts — attempting format...");
-        if (LittleFS.format()) {
-            Serial.println("LittleFS format succeeded, retrying mount...");
-            if (!LittleFS.begin()) { Serial.println("LittleFS mount still failed in loadGhosts"); return; }
-        } else {
-            Serial.println("LittleFS format failed in loadGhosts"); return;
-        }
-    }
-
-    const char* tryPatterns[] = {"/%s", "/assets/%s", "/%s", "/assets/%s" };
-    for (int g = 0; g < MAX_GHOSTS; ++g) {
-        char tryPath[96];
-        bool found = false;
-        // Try exact filename first, then lowercased variant, and in /assets/
-        for (auto &pat : tryPatterns) {
-            snprintf(tryPath, sizeof(tryPath), pat, ghostFileNames[g]);
-            if (LittleFS.exists(tryPath)) { found = true; break; }
-            // lowercased name
-            char lower[64]; strncpy(lower, ghostFileNames[g], sizeof(lower)-1); lower[sizeof(lower)-1]=0;
-            for (char *p = lower; *p; ++p) *p = tolower(*p);
-            snprintf(tryPath, sizeof(tryPath), pat, lower);
-            if (LittleFS.exists(tryPath)) { found = true; break; }
-        }
-        if (!found) {
-            Serial.printf("Ghost PNG not found for %s\n", ghostFileNames[g]);
-            ghostBuffers[g] = nullptr; ghostW[g] = ghostH[g] = 0;
-            continue;
-        }
-        Serial.printf("Loading ghost PNG %s\n", tryPath);
-        int w = 0, h = 0;
-        if (decodePNGToBuffer(tryPath, &ghostBuffers[g], w, h)) {
-            ghostW[g] = w; ghostH[g] = h;
-            Serial.printf("Loaded ghost %s -> %dx%d\n", ghostFileNames[g], w, h);
-        } else {
-            Serial.printf("Failed to decode ghost %s\n", ghostFileNames[g]);
-            ghostBuffers[g] = nullptr; ghostW[g] = ghostH[g] = 0;
-        }
-    }
-}
+// PNG decoding and spritesheet loading removed — Pacman and ghosts are drawn procedurally (no PNGs).
 
 // Render the four ghosts in the central 2x2 box of the map
 void renderGhostsInCenter() {
@@ -286,24 +91,14 @@ void renderGhostsInCenter() {
         int sx = gx * cellSize + 2; // small inset
         int sy = gy * cellSize + 2 + pelletDiameter;
 
-        if (ghostBuffers[g]) {
-            int w = ghostW[g]; int h = ghostH[g];
-            int d_sx = gx * cellSize + (cellSize - w) / 2;
-            int d_sy = gy * cellSize + (cellSize - h) / 2 + pelletDiameter;
-            if (d_sx < 0) d_sx = 0;
-            if (d_sy < 0) d_sy = 0;
-            drawFrameWithTransparency(ghostBuffers[g], w, h, d_sx, d_sy);
-        } else {
-            // Fallback: draw a simple circular ghost-shaped blob
-            Serial.printf("Drawing fallback ghost for %s\n", ghostFileNames[g]);
-            int radius = (cellSize - 4) / 2;
-            int cx = sx + radius;
-            int cy = sy + radius;
-            tft.fillCircle(cx, cy, radius, fallbackColor[g]);
-            // eyes
-            tft.fillCircle(cx - radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
-            tft.fillCircle(cx + radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
-        }
+        // Draw a simple circular ghost-shaped blob (no PNGs)
+        int radius = (cellSize - 4) / 2;
+        int cx = sx + radius;
+        int cy = sy + radius;
+        tft.fillCircle(cx, cy, radius, fallbackColor[g]);
+        // eyes
+        tft.fillCircle(cx - radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
+        tft.fillCircle(cx + radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
     }
 }
 
@@ -331,19 +126,13 @@ void drawGame() {
     // If this is the first draw after starting, draw the full map and place Pacman
     if (prevPacX == -1) {
         drawMapOnce();
-        // Draw Pacman sprite for the first frame (use frame buffer if loaded)
-        int sx = pacmanX * cellSize + (cellSize - FRAME_W) / 2;
-        int sy = pacmanY * cellSize + (cellSize - FRAME_H) / 2 + pelletDiameter;
-        pacSprite.fillSprite(TFT_BLACK);
-        if (pacFrames[0]) {
-            pacSprite.pushImage(0, 0, FRAME_W, FRAME_H, pacFrames[0]);
-        } else {
-            // fallback to procedural large pacman
-            int r = min(FRAME_W, FRAME_H) / 2 - 2;
-            pacSprite.fillCircle(FRAME_W/2, FRAME_H/2, r, TFT_YELLOW);
-            pacSprite.fillCircle(FRAME_W/2 + 4, FRAME_H/2 - 6, 2, TFT_BLACK);
-        }
-        pacSprite.pushSprite(sx, sy);
+        // Draw Pacman procedurally as a yellow circle (first frame)
+        int cx = pacmanX * cellSize + cellSize/2;
+        int cy = pacmanY * cellSize + cellSize/2 + pelletDiameter;
+        int r = pacmanRadius;
+        tft.fillCircle(cx, cy, r, TFT_YELLOW);
+        // simple eye
+        tft.fillCircle(cx + 3, cy - 4, 1, TFT_BLACK);
         prevPacX = pacmanX;
         prevPacY = pacmanY;
         return;
@@ -419,28 +208,38 @@ void drawGame() {
     prevPacX = pacmanX;
     prevPacY = pacmanY;
     */
-    // Update animation frame index
+    // Update simple mouth animation state
     pacAnimCounter++;
     if (pacAnimCounter >= pacAnimThreshold) {
-        currentFrameIdx = (currentFrameIdx + 1) % PACMAN_FRAME_COUNT;
+        pacMouthOpen = !pacMouthOpen;
         pacAnimCounter = 0;
     }
 
     // Position Pacman centered in cell (shift down by pellet diameter)
-    int sx = pacmanX * cellSize + (cellSize - FRAME_W) / 2;
-    int sy = pacmanY * cellSize + (cellSize - FRAME_H) / 2 + pelletDiameter;
+    int cx = pacmanX * cellSize + cellSize / 2;
+    int cy = pacmanY * cellSize + cellSize / 2 + pelletDiameter;
+    int r = pacmanRadius;
 
-    // Render current frame (or fallback) to the display, honoring transparency
-    if (pacFrames[currentFrameIdx]) {
-        drawFrameWithTransparency(pacFrames[currentFrameIdx], FRAME_W, FRAME_H, sx, sy);
-    } else {
-        // fallback procedural: draw into sprite and push
-        pacSprite.fillSprite(TFT_BLACK);
-        int r = min(FRAME_W, FRAME_H) / 2 - 2;
-        pacSprite.fillCircle(FRAME_W/2, FRAME_H/2, r, TFT_YELLOW);
-        pacSprite.fillCircle(FRAME_W/2 + 4, FRAME_H/2 - 6, 2, TFT_BLACK);
-        pacSprite.pushSprite(sx, sy);
+    // Draw the body
+    tft.fillCircle(cx, cy, r, TFT_YELLOW);
+
+    // Draw mouth (a simple triangle) when mouth is open
+    if (pacMouthOpen) {
+        if (lastDirX > 0) { // right
+            tft.fillTriangle(cx, cy, cx + r, cy - r/2, cx + r, cy + r/2, TFT_BLACK);
+        } else if (lastDirX < 0) { // left
+            tft.fillTriangle(cx, cy, cx - r, cy - r/2, cx - r, cy + r/2, TFT_BLACK);
+        } else if (lastDirY < 0) { // up
+            tft.fillTriangle(cx, cy, cx - r/2, cy - r, cx + r/2, cy - r, TFT_BLACK);
+        } else if (lastDirY > 0) { // down
+            tft.fillTriangle(cx, cy, cx - r/2, cy + r, cx + r/2, cy + r, TFT_BLACK);
+        }
     }
+
+    // Eye (position depends on direction)
+    int ex = cx + (lastDirX > 0 ? 3 : (lastDirX < 0 ? -3 : 2));
+    int ey = cy - 4 + (lastDirY > 0 ? 1 : (lastDirY < 0 ? -1 : 0));
+    tft.fillCircle(ex, ey, 1, TFT_BLACK);
 
     prevPacX = pacmanX;
     prevPacY = pacmanY;
@@ -541,14 +340,7 @@ void setup() {
     //Draw a small test rectangle to check drawing commands
     tft.fillRect(10, 10, 100, 50, TFT_YELLOW);
     delay(1000);
- // Load the sheet from assets directory in Flash
-    loadSpritesheet("/assets/PacMan_Spritesheet.png"); 
-    
-    // Create the rendering sprite
-    pacSprite.createSprite(FRAME_W, FRAME_H);
-
-    // Load ghosts from LittleFS (white, red, green, blue)
-    loadGhosts();
+ // PNG functionality removed; use procedural sprites (no file loading)
 
     showStartScreen();
 
