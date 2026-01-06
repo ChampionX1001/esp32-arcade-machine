@@ -5,12 +5,21 @@
 #include <Audio.h> // ESP32-audioI2S
 #include <SD.h>
 #include <FS.h>
+#include <LittleFS.h>
+#include <PNGdec.h>
 
 // Pin definitions (adjust for your board)
 #define SD_CS 5
 
 TFT_eSPI tft = TFT_eSPI();
 Audio audio;
+PNG png;
+#define MAX_FRAMES 14
+#define FRAME_W 32
+#define FRAME_H 32
+
+uint16_t* pacFrames[MAX_FRAMES] = { nullptr }; 
+int currentFrameIdx = 0;
 
 // Pacman game map
 const int cellSize = 16;
@@ -18,6 +27,8 @@ const int mapWidth = 30;
 const int mapHeight = 20;
 // shift pellets down a bit inside each cell (pixels)
 const int pelletYOffset = -2;
+const int pelletRadius = 2;
+const int pelletDiameter = pelletRadius * 2;
 // Pacman rendering radius (smaller than half-cell)
 const int pacmanRadius = 5;
 int pacmanX = 1, pacmanY = 1, dirX = 0, dirY = 0;
@@ -25,7 +36,7 @@ int prevPacX = -1, prevPacY = -1; // previous Pacman position (for selective red
 
 // Sprite animation state
 TFT_eSprite pacSprite = TFT_eSprite(&tft);
-const int pacSpriteSize = 14; // pixels
+const int pacSpriteSize = FRAME_W; // use frame width (32)
 int pacAnimCounter = 0;
 const int pacAnimThreshold = 3; // lower = faster animation
 bool pacMouthOpen = true;
@@ -56,6 +67,46 @@ int gameMap[mapHeight][mapWidth] = {
 // Game state
 bool gameStarted = false;
 
+// LittleFS Wrapper Functions for PNGdec
+File pngFile;
+void * myOpen(const char *f, int32_t *s) { 
+    pngFile = LittleFS.open(f, "r"); 
+    if (!pngFile) return NULL;
+    *s = pngFile.size(); 
+    return &pngFile; 
+}
+
+void myClose(void *h) { if (pngFile) pngFile.close(); }
+int32_t myRead(PNGFILE *p, uint8_t *b, int32_t l) { return pngFile.read(b, l); }
+int32_t mySeek(PNGFILE *p, int32_t pos) { return pngFile.seek(pos); }
+
+// Callback: Slices the horizontal sheet into 14 RAM buffers
+// Change "void" to "int"
+int pngSliceCallback(PNGDRAW *pDraw) {
+    uint16_t lineBuffer[FRAME_W * MAX_FRAMES];
+    png.getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_BIG_ENDIAN, 0x0000);
+    
+    for (int i = 0; i < MAX_FRAMES; i++) {
+        memcpy(pacFrames[i] + (pDraw->y * FRAME_W), &lineBuffer[i * FRAME_W], FRAME_W * 2);
+    }
+    return 1; // Return 1 to continue decoding the next line
+}
+
+void loadSpritesheet(const char* path) {
+    if (!LittleFS.begin()) { Serial.println("LittleFS Mount Failed"); return; }
+    
+    // Allocate RAM for frames
+    for (int i = 0; i < MAX_FRAMES; i++) {
+        pacFrames[i] = (uint16_t*)malloc(FRAME_W * FRAME_H * 2);
+    }
+
+    if (png.open(path, myOpen, myClose, myRead, mySeek, pngSliceCallback) == PNG_SUCCESS) {
+        png.decode(NULL, 0);
+        png.close();
+        Serial.println("Spritesheet loaded from Flash to RAM");
+    }
+}
+
 // Draw the static map once (walls and pellets)
 void drawMapOnce() {
     tft.fillScreen(TFT_BLACK);
@@ -77,37 +128,64 @@ void drawGame() {
     // If this is the first draw after starting, draw the full map and place Pacman
     if (prevPacX == -1) {
         drawMapOnce();
-        // Draw Pacman sprite for the first frame
-        int sx = pacmanX * cellSize + (cellSize - pacSpriteSize) / 2;
-        int sy = pacmanY * cellSize + (cellSize - pacSpriteSize) / 2;
+        // Draw Pacman sprite for the first frame (use frame buffer if loaded)
+        int sx = pacmanX * cellSize + (cellSize - FRAME_W) / 2;
+        int sy = pacmanY * cellSize + (cellSize - FRAME_H) / 2 + pelletDiameter;
         pacSprite.fillSprite(TFT_BLACK);
-        // simple animated radius to mimic sprite frames
-        int r = pacmanRadius + (pacMouthOpen ? 1 : 0);
-        pacSprite.fillCircle(pacSpriteSize/2, pacSpriteSize/2, r, TFT_YELLOW);
-        // small eye
-        pacSprite.fillCircle(pacSpriteSize/2 + 2, pacSpriteSize/2 - 3, 1, TFT_BLACK);
+        if (pacFrames[0]) {
+            pacSprite.pushImage(0, 0, FRAME_W, FRAME_H, pacFrames[0]);
+        } else {
+            // fallback to procedural large pacman
+            int r = min(FRAME_W, FRAME_H) / 2 - 2;
+            pacSprite.fillCircle(FRAME_W/2, FRAME_H/2, r, TFT_YELLOW);
+            pacSprite.fillCircle(FRAME_W/2 + 4, FRAME_H/2 - 6, 2, TFT_BLACK);
+        }
         pacSprite.pushSprite(sx, sy);
         prevPacX = pacmanX;
         prevPacY = pacmanY;
         return;
     }
 
-    // Erase Pacman's previous position by redrawing that cell based on the map
+    // Erase Pacman's previous position by clearing the full sprite bounding box
     if (prevPacX != pacmanX || prevPacY != pacmanY) {
-        int px = prevPacX * cellSize;
-        int py = prevPacY * cellSize;
-        int cell = gameMap[prevPacY][prevPacX];
-        if (cell == 1) {
-            tft.fillRect(px, py, cellSize, cellSize, TFT_BLUE);
-        } else if (cell == 2) {
-            tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
-            tft.fillCircle(px + cellSize / 2, py + cellSize / 2 + pelletYOffset, 2, TFT_YELLOW);
-        } else {
-            tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
+        // bounding box of the previous sprite (centered on the cell)
+        int prevSx = prevPacX * cellSize + (cellSize - FRAME_W) / 2;
+        int prevSy = prevPacY * cellSize + (cellSize - FRAME_H) / 2 + pelletDiameter;
+
+        // clamp to screen bounds
+        int sx = prevSx; if (sx < 0) sx = 0;
+        int sy = prevSy; if (sy < 0) sy = 0;
+        int sw = FRAME_W; if (sx + sw > tft.width()) sw = tft.width() - sx;
+        int sh = FRAME_H; if (sy + sh > tft.height()) sh = tft.height() - sy;
+        if (sw > 0 && sh > 0) {
+            tft.fillRect(sx, sy, sw, sh, TFT_BLACK);
+        }
+
+        // redraw any map cells intersecting that box
+        int x0 = sx / cellSize; if (x0 < 0) x0 = 0;
+        int y0 = sy / cellSize; if (y0 < 0) y0 = 0;
+        int x1 = (sx + sw - 1) / cellSize; if (x1 >= mapWidth) x1 = mapWidth - 1;
+        int y1 = (sy + sh - 1) / cellSize; if (y1 >= mapHeight) y1 = mapHeight - 1;
+
+        for (int yy = y0; yy <= y1; ++yy) {
+            for (int xx = x0; xx <= x1; ++xx) {
+                int px = xx * cellSize;
+                int py = yy * cellSize;
+                int cell = gameMap[yy][xx];
+                if (cell == 1) {
+                    tft.fillRect(px, py, cellSize, cellSize, TFT_BLUE);
+                } else if (cell == 2) {
+                    tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
+                    tft.fillCircle(px + cellSize / 2, py + cellSize / 2 + pelletYOffset, 2, TFT_YELLOW);
+                } else {
+                    tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
+                }
+            }
         }
     }
 
     // Draw Pacman at the new position using a sprite
+    /*
     pacAnimCounter++;
     if (pacAnimCounter >= pacAnimThreshold) { pacMouthOpen = !pacMouthOpen; pacAnimCounter = 0; }
     int sx = pacmanX * cellSize + (cellSize - pacSpriteSize) / 2;
@@ -135,6 +213,33 @@ void drawGame() {
     pacSprite.pushSprite(sx, sy);
 
     // Remember current as previous for next iteration
+    prevPacX = pacmanX;
+    prevPacY = pacmanY;
+    */
+    // Update animation frame index
+    pacAnimCounter++;
+    if (pacAnimCounter >= pacAnimThreshold) {
+        currentFrameIdx = (currentFrameIdx + 1) % MAX_FRAMES;
+        pacAnimCounter = 0;
+    }
+
+    // Position Pacman centered in cell (shift down by pellet diameter)
+    int sx = pacmanX * cellSize + (cellSize - FRAME_W) / 2;
+    int sy = pacmanY * cellSize + (cellSize - FRAME_H) / 2 + pelletDiameter;
+
+    // Render current frame (or fallback) into the pacSprite and push to screen
+    pacSprite.fillSprite(TFT_BLACK);
+    if (pacFrames[currentFrameIdx]) {
+        pacSprite.pushImage(0, 0, FRAME_W, FRAME_H, pacFrames[currentFrameIdx]);
+    } else {
+        // fallback procedural: large pacman
+        int r = min(FRAME_W, FRAME_H) / 2 - 2;
+        pacSprite.fillCircle(FRAME_W/2, FRAME_H/2, r, TFT_YELLOW);
+        pacSprite.fillCircle(FRAME_W/2 + 4, FRAME_H/2 - 6, 2, TFT_BLACK);
+    }
+    // Push the finalized sprite to the display
+    pacSprite.pushSprite(sx, sy);
+
     prevPacX = pacmanX;
     prevPacY = pacmanY;
 }
@@ -194,8 +299,7 @@ void setup() {
     tft.init(); // Initialize with ST7796 driver
     tft.setRotation(1);
 
-    // Create Pacman sprite
-    pacSprite.createSprite(pacSpriteSize, pacSpriteSize);
+    // Pacman rendering sprite will be created as FRAME_W x FRAME_H after loading the sheet
 
     // Diagnostic prints
    // Serial.print("TFT width="); Serial.print(tft.width());
@@ -226,16 +330,20 @@ void setup() {
     digitalWrite(27, HIGH);
     delay(200);
     digitalWrite(27, LOW);
-    delay(200);
-    digitalWrite(27, HIGH);
-    delay(200);
-    digitalWrite(27, LOW);
-    delay(200);
+    //delay(200);
+    //digitalWrite(27, HIGH);
+    //delay(200);
+   // digitalWrite(27, LOW);
+   // delay(200);
     
-    // Draw a small test rectangle to check drawing commands
-   // tft.fillRect(10, 10, 100, 50, TFT_YELLOW);
-    //delay(1000);
-
+    //Draw a small test rectangle to check drawing commands
+    tft.fillRect(10, 10, 100, 50, TFT_YELLOW);
+    delay(1000);
+ // Load the sheet from assets directory in Flash
+    loadSpritesheet("/assets/PacMan_Spritesheet.png"); 
+    
+    // Create the rendering sprite
+    pacSprite.createSprite(FRAME_W, FRAME_H);
     showStartScreen();
 
     // Touch diagnostics: check IRQ pin and poll getTouch()
