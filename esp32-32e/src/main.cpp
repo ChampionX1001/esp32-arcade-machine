@@ -13,27 +13,37 @@ TFT_eSPI tft = TFT_eSPI();
 Audio audio;
 
 // Pacman game map
-const int cellSize = 20;
-const int mapWidth = 16;
-const int mapHeight = 9;
+const int cellSize = 16;
+const int mapWidth = 30;
+const int mapHeight = 20;
 int pacmanX = 1, pacmanY = 1, dirX = 0, dirY = 0;
 int gameMap[mapHeight][mapWidth] = {
-    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
-    {1,2,2,2,2,2,2,1,2,2,2,2,2,2,2,1},
-    {1,2,1,1,1,2,2,1,2,2,1,1,1,2,2,1},
-    {1,2,2,2,1,2,2,2,2,2,1,2,2,2,2,1},
-    {1,1,1,2,1,1,1,1,1,1,1,2,1,1,1,1},
-    {1,2,2,2,2,2,2,1,2,2,2,2,2,2,2,1},
-    {1,2,1,1,1,2,2,1,2,2,1,1,1,2,2,1},
-    {1,2,2,2,1,2,2,2,2,2,1,2,2,2,2,1},
-    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
-};
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,2,2,2,2,2,2,1,2,2,2,2,2,2,2,1,1,1,1,2,2,2,1,2,2,2,2,2,2,2},
+    {1,2,1,1,1,2,2,1,2,2,1,1,1,2,2,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,2,2,2,1,2,2,2,2,2,1,2,2,2,2,1,2,2,2,1,2,2,2,2,2,2,2,2,2,2},
+    {1,1,1,2,1,1,1,1,1,1,1,2,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2},
+    {1,2,2,2,2,2,2,1,2,2,2,2,2,2,2,1,1,1,1,1,2,2,2,2,1,2,2,1,2,2},
+    {1,2,1,1,1,2,2,1,2,2,1,1,1,2,2,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,2,2,2,1,2,2,2,2,2,1,2,2,2,2,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,1,1},
+};  
 
 // Game state
 bool gameStarted = false;
 
 void drawGame() {
-    tft.fillScreen(TFT_BLACK);
     for (int y = 0; y < mapHeight; ++y) {
         for (int x = 0; x < mapWidth; ++x) {
             int px = x * cellSize;
@@ -65,8 +75,8 @@ void playWav(const char* filename) {
 
 void handleInput() {
     // Example: Use buttons on GPIOs for input (replace with your actual pins)
-    if (digitalRead(32) == LOW) { dirX = -1; dirY = 0; } // Left
-    else if (digitalRead(33) == LOW) { dirX = 1; dirY = 0; } // Right
+    //if (digitalRead(32) == LOW) { dirX = -1; dirY = 0; } // Left
+    if (digitalRead(35) == LOW) { dirX = 1; dirY = 0; } // Right (use IO35 instead of IO33 which is TOUCH_CS)
     else if (digitalRead(25) == LOW) { dirX = 0; dirY = -1; } // Up
     else if (digitalRead(26) == LOW) { dirX = 0; dirY = 1; } // Down
     else { dirX = 0; dirY = 0; }
@@ -94,40 +104,82 @@ void setup() {
     delay(1000);
     Serial.println("--- BOOT SUCCESSFUL ---");
 
-    // Initialize output pin for testing
-    pinMode(27, OUTPUT);
-    digitalWrite(27, HIGH); 
 
-    //pinMode(4, OUTPUT);
-    //digitalWrite(4, LOW);
-    //delay(100);
-    //digitalWrite(4, HIGH);
-    //delay(100);
-
+    Serial.println("TFT is initialized");
     tft.init(); // Initialize with ST7796 driver
     tft.setRotation(1);
+    // Quick color test to verify display commands reach the panel
+    tft.fillScreen(TFT_RED);
+    delay(300);
+    tft.fillScreen(TFT_GREEN);
+    delay(300);
     tft.fillScreen(TFT_BLUE);
+    delay(300);
+
+    // Diagnostic prints
+    Serial.print("TFT width="); Serial.print(tft.width());
+    Serial.print(" height="); Serial.println(tft.height());
+
+    // Print the pin macros from User_Setup.h for verification
+    Serial.print("TFT pins MOSI="); Serial.print(TFT_MOSI);
+    Serial.print(" SCLK="); Serial.print(TFT_SCLK);
+    Serial.print(" MISO="); Serial.print(TFT_MISO);
+    Serial.print(" CS="); Serial.print(TFT_CS);
+    Serial.print(" DC="); Serial.print(TFT_DC);
+    Serial.print(" BL="); Serial.println(TFT_BL);
+
+    // Draw a center pixel and a small rect to check drawing commands
+    int cx = tft.width() / 2;
+    int cy = tft.height() / 2;
+    Serial.print("Drawing center pixel at "); Serial.print(cx); Serial.print(","); Serial.println(cy);
+    tft.drawPixel(cx, cy, TFT_WHITE);
+    delay(200);
+    tft.fillRect(cx - 30, cy - 20, 60, 40, TFT_YELLOW);
+    delay(500);
+
+    // Toggle backlight to verify polarity (GPIO27 used as BL on this board)
+    pinMode(27, OUTPUT);
+    Serial.println("Toggling BL (GPIO27) to test backlight polarity");
+    digitalWrite(27, LOW);
+    delay(200);
+    digitalWrite(27, HIGH);
+    delay(200);
+    digitalWrite(27, LOW);
+    delay(200);
+    digitalWrite(27, HIGH);
+    delay(200);
+    digitalWrite(27, LOW);
+    delay(200);
+    
+    // Draw a small test rectangle to check drawing commands
+    tft.fillRect(10, 10, 100, 50, TFT_YELLOW);
+    delay(1000);
+
     showStartScreen();
 
+    // Touch diagnostics: check IRQ pin and poll getTouch()
+    pinMode(TOUCH_IRQ, INPUT_PULLUP);
+    Serial.print("Touch IRQ initial state (LOW when touched): ");
+    Serial.println(digitalRead(TOUCH_IRQ));
+    Serial.println("Touch the screen now — polling for getTouch() for 5 seconds...");
+    unsigned long st = millis();
+    while (millis() - st < 5000) {
+        uint16_t tx = 0, ty = 0;
+        // Print IRQ pin state for visibility
+        Serial.print("IRQ="); Serial.print(digitalRead(TOUCH_IRQ)); Serial.print(" ");
+        if (tft.getTouch(&tx, &ty)) {
+            Serial.print("getTouch TRUE: "); Serial.print(tx); Serial.print(","); Serial.println(ty);
+            break;
+        }
+        delay(200);
+    }
+    delay(2000);
 
-    // Setup buttons
+    // Setup PullUps
     pinMode(32, INPUT_PULLUP);
-    pinMode(33, INPUT_PULLUP);
     pinMode(25, INPUT_PULLUP);
     pinMode(26, INPUT_PULLUP);
-   // pinMode(27, INPUT_PULLUP);
 
-    // Setup SD card
-  //  if (!SD.begin(SD_CS)) {
-    //tft.setTextColor(TFT_RED, TFT_BLACK);
-      //  tft.drawString("SD Card Error!", 10, 10, 2);
-        //while (1);
-
-   // if (!SD.begin(SD_CS)) {
-     //   tft.setTextColor(TFT_RED, TFT_BLACK);
-      //  tft.drawString("SD Error! Check Card", 10, 10, 2);
-      //  Serial.println("SD Card Mount Failed. Retrying in 5 seconds...");
-    
     //Instead of while(1), wait and then restart or retry
    // delay(5000); 
    // ESP.restart(); // Reboots the board to try setup() again
@@ -146,26 +198,33 @@ void loop() {
     if (!gameStarted) {
         uint16_t tx = 0, ty = 0;
         bool touched = false;
-        // Try touch if supported by TFT_eSPI
-        // getTouch returns true when screen is touched (depends on config)
-       // if (tft.getTouch(&tx, &ty)) touched = true;
-        // Also allow starting via any direction button
-        if (digitalRead(32) == LOW || digitalRead(33) == LOW || digitalRead(25) == LOW || digitalRead(26) == LOW) touched = true;
+        digitalWrite(27, HIGH);
 
+        // getTouch returns true when screen is touched (depends on config)
+        if (tft.getTouch(&tx, &ty)) {
+            Serial.print("Touch detected at "); Serial.print(tx); Serial.print(", "); Serial.println(ty);
+            touched = true;}
+        // Also allow starting via any direction button
+        //if (digitalRead(32) == LOW || digitalRead(33) == LOW || digitalRead(25) == LOW || digitalRead(26) == LOW) touched = true;
+        
+        
+        Serial.println("Waiting for touch to start the game...");
         if (touched) {
             gameStarted = true;
             tft.fillScreen(TFT_BLACK);
             drawGame();
             delay(200);
         } else {
+            Serial.println("No touch detected, still waiting...");
             delay(50);
-            return;
-        }
+            tft.fillScreen(TFT_BLUE);
+            return; 
+            }
     }
 
     handleInput();
     updateGame();
     drawGame();
-    delay(1000);
+    delay(100);
    // audio.loop(); // Keep audio running
 }
