@@ -39,7 +39,7 @@ int prevPacX = -1, prevPacY = -1; // previous Pacman position (for selective red
 
 // Sprite animation state
 TFT_eSprite pacSprite = TFT_eSprite(&tft);
-const int pacSpriteSize = FRAME_W; // use frame width (32)
+const int pacSpriteSize = FRAME_W; // use fram  e width (32)
 int pacAnimCounter = 0;
 const int pacAnimThreshold = 3; // lower = faster animation
 bool pacMouthOpen = true;
@@ -70,35 +70,38 @@ int gameMap[mapHeight][mapWidth] = {
 // Game state
 bool gameStarted = false;
 
-// PNG file wrapper removed (no PNGs used)
+// Movement & timing
+unsigned long gameStartMillis = 0;
+bool movementEnabled = false; // becomes true 10s after game start
+unsigned long lastPacMove = 0;
+unsigned long lastGhostMove = 0;
+const unsigned long pacMoveInterval = 200; // ms per pacman step
+unsigned long ghostMoveInterval = (unsigned long)(pacMoveInterval / 0.75 + 0.5); // ghosts are 0.75x pacman speed
 
-// PNG decoding callbacks removed (no PNGs used)
+// Ghost positions (grid cells)
+int ghostX[MAX_GHOSTS];
+int ghostY[MAX_GHOSTS];
 
-// PNG decoding helper removed (no PNGs used)
 
-// Draw a decoded frame buffer to the TFT honoring TRANSPARENT_COLOR
-// PNG decoding and spritesheet loading removed — Pacman and ghosts are drawn procedurally (no PNGs).
 
-// Render the four ghosts in the central 2x2 box of the map
-void renderGhostsInCenter() {
-    int baseX = (mapWidth / 2) - 1; // left column of central 2x2
-    int baseY = (mapHeight / 2) - 1; // top row of central 2x2
+// Draw a ghost at grid cell (gx,gy) with color index g
+void drawGhostAt(int g, int gx, int gy) {
     const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_BLUE };
+    int sx = gx * cellSize + 2; // small inset
+    int sy = gy * cellSize + pelletDiameter; // moved up 2px earlier
+    int radius = (cellSize - 4) / 2;
+    int cx = sx + radius;
+    int cy = sy + radius;
+    tft.fillCircle(cx, cy, radius, fallbackColor[g]);
+    // eyes
+    tft.fillCircle(cx - radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
+    tft.fillCircle(cx + radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
+}
 
+// Render the four ghosts using their current positions
+void renderGhostsInCenter() {
     for (int g = 0; g < MAX_GHOSTS; ++g) {
-        int gx = baseX + (g % 2);
-        int gy = baseY + (g / 2);
-        int sx = gx * cellSize + 2; // small inset
-        int sy = gy * cellSize + 2 + pelletDiameter;
-
-        // Draw a simple circular ghost-shaped blob (no PNGs)
-        int radius = (cellSize - 4) / 2;
-        int cx = sx + radius;
-        int cy = sy + radius;
-        tft.fillCircle(cx, cy, radius, fallbackColor[g]);
-        // eyes
-        tft.fillCircle(cx - radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
-        tft.fillCircle(cx + radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
+        drawGhostAt(g, ghostX[g], ghostY[g]);
     }
 }
 
@@ -121,6 +124,91 @@ void drawMapOnce() {
     // Draw the ghosts in the central box
     renderGhostsInCenter();
 }
+
+// Helper: redraw a single cell based on the map (used to restore tiles when sprites move)
+void redrawCell(int gx, int gy) {
+    int px = gx * cellSize;
+    int py = gy * cellSize;
+    int cell = gameMap[gy][gx];
+    if (cell == 1) {
+        tft.fillRect(px, py, cellSize, cellSize, TFT_BLUE);
+    } else if (cell == 2) {
+        tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
+        tft.fillCircle(px + cellSize / 2, py + cellSize / 2 + pelletYOffset, 2, TFT_YELLOW);
+    } else {
+        tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
+    }
+}
+
+// Compute distances from Pacman and move each ghost one step along the shortest path
+void moveGhostsStep() {
+    // BFS from Pacman to all reachable cells
+    static int dist[mapHeight][mapWidth];
+    for (int y = 0; y < mapHeight; ++y) for (int x = 0; x < mapWidth; ++x) dist[y][x] = -1;
+
+    int qx[mapWidth * mapHeight];
+    int qy[mapWidth * mapHeight];
+    int head = 0, tail = 0;
+    dist[pacmanY][pacmanX] = 0;
+    qx[tail] = pacmanX; qy[tail] = pacmanY; tail++;
+
+    while (head < tail) {
+        int x = qx[head]; int y = qy[head]; head++;
+        const int dx[4] = {1, -1, 0, 0};
+        const int dy[4] = {0, 0, 1, -1};
+        for (int d = 0; d < 4; ++d) {
+            int nx = x + dx[d]; int ny = y + dy[d];
+            if (nx < 0 || nx >= mapWidth || ny < 0 || ny >= mapHeight) continue;
+            if (gameMap[ny][nx] == 1) continue; // wall
+            if (dist[ny][nx] != -1) continue;
+            dist[ny][nx] = dist[y][x] + 1;
+            qx[tail] = nx; qy[tail] = ny; tail++;
+        }
+    }
+
+    // Occupancy map to avoid ghosts stepping on each other
+    static bool occ[mapHeight][mapWidth];
+    for (int y = 0; y < mapHeight; ++y) for (int x = 0; x < mapWidth; ++x) occ[y][x] = false;
+    for (int i = 0; i < MAX_GHOSTS; ++i) {
+        if (ghostX[i] >= 0 && ghostY[i] >= 0 && ghostX[i] < mapWidth && ghostY[i] < mapHeight)
+            occ[ghostY[i]][ghostX[i]] = true;
+    }
+
+    // Move each ghost one step towards Pacman (if reachable)
+    for (int g = 0; g < MAX_GHOSTS; ++g) {
+        int gx = ghostX[g]; int gy = ghostY[g];
+        if (gx < 0 || gy < 0 || gx >= mapWidth || gy >= mapHeight) continue;
+        if (dist[gy][gx] == -1) continue; // unreachable
+        if (dist[gy][gx] == 0) continue; // already at Pacman's cell
+
+        // free current cell in occupancy map (we'll reserve the new cell soon)
+        occ[gy][gx] = false;
+
+        // find neighbor with distance one less and not occupied
+        int bestNx = gx, bestNy = gy;
+        const int nxDelta[4] = {1, -1, 0, 0};
+        const int nyDelta[4] = {0, 0, 1, -1};
+        for (int d = 0; d < 4; ++d) {
+            int nx = gx + nxDelta[d]; int ny = gy + nyDelta[d];
+            if (nx < 0 || nx >= mapWidth || ny < 0 || ny >= mapHeight) continue;
+            if (dist[ny][nx] != -1 && dist[ny][nx] < dist[gy][gx] && !occ[ny][nx]) { bestNx = nx; bestNy = ny; break; }
+        }
+
+        // reserve new cell in occupancy map
+        occ[bestNy][bestNx] = true;
+
+        // Erase old ghost position by redrawing underlying cell
+        redrawCell(gx, gy);
+        // Update position
+        Serial.printf("ghost %d chase step: (%d,%d) -> (%d,%d)\n", g, gx, gy, bestNx, bestNy);
+        ghostX[g] = bestNx;
+        ghostY[g] = bestNy;
+        // Draw ghost at new position
+        drawGhostAt(g, ghostX[g], ghostY[g]);
+    }
+}
+
+
 
 void drawGame() {
     // If this is the first draw after starting, draw the full map and place Pacman
@@ -161,53 +249,12 @@ void drawGame() {
 
         for (int yy = y0; yy <= y1; ++yy) {
             for (int xx = x0; xx <= x1; ++xx) {
-                int px = xx * cellSize;
-                int py = yy * cellSize;
-                int cell = gameMap[yy][xx];
-                if (cell == 1) {
-                    tft.fillRect(px, py, cellSize, cellSize, TFT_BLUE);
-                } else if (cell == 2) {
-                    tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
-                    tft.fillCircle(px + cellSize / 2, py + cellSize / 2 + pelletYOffset, 2, TFT_YELLOW);
-                } else {
-                    tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
-                }
+                redrawCell(xx, yy);
             }
         }
     }
 
-    // Draw Pacman at the new position using a sprite
-    /*
-    pacAnimCounter++;
-    if (pacAnimCounter >= pacAnimThreshold) { pacMouthOpen = !pacMouthOpen; pacAnimCounter = 0; }
-    int sx = pacmanX * cellSize + (cellSize - pacSpriteSize) / 2;
-    int sy = pacmanY * cellSize + (cellSize - pacSpriteSize) / 2;
-    pacSprite.fillSprite(TFT_BLACK);
-    int r = pacmanRadius + (pacMouthOpen ? 1 : 0);
-    pacSprite.fillCircle(pacSpriteSize/2, pacSpriteSize/2, r, TFT_YELLOW);
-    // draw directional mouth when open
-    if (pacMouthOpen) {
-        int cx = pacSpriteSize/2;
-        int cy = pacSpriteSize/2;
-        int tri = r; // mouth size
-        if (lastDirX > 0) { // right
-            pacSprite.fillTriangle(cx + tri, cy, cx - tri/2, cy - tri/2, cx - tri/2, cy + tri/2, TFT_BLACK);
-        } else if (lastDirX < 0) { // left
-            pacSprite.fillTriangle(cx - tri, cy, cx + tri/2, cy - tri/2, cx + tri/2, cy + tri/2, TFT_BLACK);
-        } else if (lastDirY < 0) { // up
-            pacSprite.fillTriangle(cx, cy - tri, cx - tri/2, cy + tri/2, cx + tri/2, cy + tri/2, TFT_BLACK);
-        } else if (lastDirY > 0) { // down
-            pacSprite.fillTriangle(cx, cy + tri, cx - tri/2, cy - tri/2, cx + tri/2, cy - tri/2, TFT_BLACK);
-        }
-    }
-    // eye
-    pacSprite.fillCircle(pacSpriteSize/2 + 2, pacSpriteSize/2 - 3, 1, TFT_BLACK);
-    pacSprite.pushSprite(sx, sy);
 
-    // Remember current as previous for next iteration
-    prevPacX = pacmanX;
-    prevPacY = pacmanY;
-    */
     // Update simple mouth animation state
     pacAnimCounter++;
     if (pacAnimCounter >= pacAnimThreshold) {
@@ -398,10 +445,28 @@ void loop() {
         Serial.println("Waiting for touch to start the game...");
         if (touched) {
             gameStarted = true;
-            // Draw full static map once and then draw Pacman
+            // Initialize ghosts one-by-one across the middle columns on row 7
+            int targetCenter = mapWidth / 2;
+            int spawnCols[4] = { targetCenter - 2, targetCenter - 1, targetCenter, targetCenter + 1 };
+            for (int g = 0; g < MAX_GHOSTS; ++g) {
+                ghostX[g] = spawnCols[g];
+                ghostY[g] = 7; // row 7
+                Serial.printf("ghost %d spawned at (%d,%d)\n", g, ghostX[g], ghostY[g]);
+            }
+
+            // Draw full static map once, then ghosts and Pacman
             drawMapOnce();
+            for (int g = 0; g < MAX_GHOSTS; ++g) drawGhostAt(g, ghostX[g], ghostY[g]);
             prevPacX = -1; // signal drawGame() to perform first-draw path
             drawGame();
+
+            // Start delay timer: movement will begin after 10 seconds
+            gameStartMillis = millis();
+            movementEnabled = false;
+            lastPacMove = gameStartMillis; // prevent Pacman from moving during the 10s pre-move phase
+            lastGhostMove = gameStartMillis; // maintain ghost timing
+            Serial.println("Game started: movement will begin in 10 seconds...");
+
             delay(200);
         } else {
             Serial.println("No touch detected, still waiting...");
@@ -412,8 +477,37 @@ void loop() {
     }
 
     handleInput();
-    updateGame();
+
+    unsigned long now = millis();
+
+    // If the game has started but movement hasn't been enabled yet, check the 10s delay
+    if (gameStarted && !movementEnabled) {
+        if (now - gameStartMillis >= 10000UL) {
+            movementEnabled = true;
+            lastPacMove = now;
+            lastGhostMove = now;
+            Serial.println("Movement enabled — Pacman and ghosts will now start moving");
+        }
+    }
+
+    // Move pacman at its interval (only after the 10s delay)
+    if (movementEnabled) {
+        if (now - lastPacMove >= pacMoveInterval) {
+            updateGame();
+            lastPacMove = now;
+        }
+    }
+
+    // Move ghosts at their (slower) interval (only chase after movementEnabled)
+    if (now - lastGhostMove >= ghostMoveInterval) {
+        if (movementEnabled) {
+            Serial.println("moveGhostsStep() called (chase mode)");
+            moveGhostsStep();
+        }
+        lastGhostMove = now;
+    }
+
     drawGame();
-    delay(100);
+    delay(50);
    // audio.loop(); // Keep audio running
 }
