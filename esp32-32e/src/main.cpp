@@ -25,10 +25,12 @@ int currentFrameIdx = 0;
 const int cellSize = 16;
 const int mapWidth = 30;
 const int mapHeight = 20;
+
 // shift pellets down a bit inside each cell (pixels)
 const int pelletYOffset = -2;
 const int pelletRadius = 2;
 const int pelletDiameter = pelletRadius * 2;
+
 // Pacman rendering radius (smaller than half-cell)
 const int pacmanRadius = 5;
 int pacmanX = 1, pacmanY = 1, dirX = 0, dirY = 0;
@@ -93,17 +95,51 @@ int pngSliceCallback(PNGDRAW *pDraw) {
 }
 
 void loadSpritesheet(const char* path) {
-    if (!LittleFS.begin()) { Serial.println("LittleFS Mount Failed"); return; }
-    
-    // Allocate RAM for frames
+   // Attempt to mount LittleFS; try formatting if mount fails
+   if (!LittleFS.begin()) {
+      Serial.println("LittleFS mount failed — attempting format...");
+      if (LittleFS.format()) {
+        Serial.println("LittleFS format succeeded, retrying mount...");
+        if (LittleFS.begin()) Serial.println("LittleFS mounted after format");
+        else Serial.println("Mount still failed after format");
+      } else {
+        Serial.println("LittleFS format failed");
+        return;
+      }
+   }
+
+    // Allocate RAM for frames and zero them to avoid showing uninitialized data
     for (int i = 0; i < MAX_FRAMES; i++) {
         pacFrames[i] = (uint16_t*)malloc(FRAME_W * FRAME_H * 2);
+        if (pacFrames[i]) memset(pacFrames[i], 0x00, FRAME_W * FRAME_H * 2);
+        else Serial.printf("Failed allocating frame %d\n", i);
     }
 
     if (png.open(path, myOpen, myClose, myRead, mySeek, pngSliceCallback) == PNG_SUCCESS) {
-        png.decode(NULL, 0);
+        int sheetW = png.getWidth();
+        int sheetH = png.getHeight();
+        if (sheetW < FRAME_W * MAX_FRAMES || sheetH < FRAME_H) {
+            Serial.printf("Spritesheet unexpected size: %dx%d (need >= %dx%d)\n", sheetW, sheetH, FRAME_W * MAX_FRAMES, FRAME_H);
+            png.close();
+            for (int i = 0; i < MAX_FRAMES; i++) { free(pacFrames[i]); pacFrames[i] = nullptr; }
+            return;
+        }
+
+        int ret = png.decode(NULL, 0);
+        if (ret != PNG_SUCCESS) {
+            Serial.printf("PNG decode failed: %d\n", ret);
+            png.close();
+            for (int i = 0; i < MAX_FRAMES; i++) { free(pacFrames[i]); pacFrames[i] = nullptr; }
+            return;
+        }
+
         png.close();
         Serial.println("Spritesheet loaded from Flash to RAM");
+        return;
+    } else {
+        Serial.println("PNG open failed");
+        for (int i = 0; i < MAX_FRAMES; i++) { free(pacFrames[i]); pacFrames[i] = nullptr; }
+        return;
     }
 }
 
