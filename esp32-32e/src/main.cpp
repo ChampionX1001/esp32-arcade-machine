@@ -29,6 +29,9 @@ int gameMap[mapHeight][mapWidth] = {
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
 };
 
+// Game state
+bool gameStarted = false;
+
 void drawGame() {
     tft.fillScreen(TFT_BLACK);
     for (int y = 0; y < mapHeight; ++y) {
@@ -47,9 +50,17 @@ void drawGame() {
     tft.fillCircle(pacmanX * cellSize + cellSize / 2, pacmanY * cellSize + cellSize / 2, cellSize / 2, TFT_YELLOW);
 }
 
+void showStartScreen() {
+    tft.fillScreen(TFT_BLUE);
+    tft.setTextColor(TFT_WHITE, TFT_BLUE);
+    tft.setTextSize(2);
+    // Exact text requested by user
+    tft.drawString("Press Anywhere on the Screen to Play", 10, (tft.height() / 2) - 10, 2);
+}
+
 void playWav(const char* filename) {
     audio.stopSong();
-    audio.connecttoFS(SD, filename);
+   // audio.connecttoFS(SD, filename);
 }
 
 void handleInput() {
@@ -60,9 +71,9 @@ void handleInput() {
     else if (digitalRead(26) == LOW) { dirX = 0; dirY = 1; } // Down
     else { dirX = 0; dirY = 0; }
     // Play sound on a specific button (e.g., GPIO 27)
-    if (digitalRead(27) == LOW) {
-        playWav("/PacManLittleDot.wav");
-    }
+  //  if (digitalRead(27) == LOW) {
+    //    playWav("/PacManLittleDot.wav");
+    //}
 }
 
 void updateGame() {
@@ -79,32 +90,82 @@ void updateGame() {
 }
 
 void setup() {
-    tft.init();
+    Serial.begin(115200);
+    delay(1000);
+    Serial.println("--- BOOT SUCCESSFUL ---");
+
+    // Initialize output pin for testing
+    pinMode(27, OUTPUT);
+    digitalWrite(27, HIGH); 
+
+    //pinMode(4, OUTPUT);
+    //digitalWrite(4, LOW);
+    //delay(100);
+    //digitalWrite(4, HIGH);
+    //delay(100);
+
+    tft.init(); // Initialize with ST7796 driver
     tft.setRotation(1);
-    tft.fillScreen(TFT_BLACK);
+    tft.fillScreen(TFT_BLUE);
+    showStartScreen();
+
 
     // Setup buttons
     pinMode(32, INPUT_PULLUP);
     pinMode(33, INPUT_PULLUP);
     pinMode(25, INPUT_PULLUP);
     pinMode(26, INPUT_PULLUP);
-    pinMode(27, INPUT_PULLUP);
+   // pinMode(27, INPUT_PULLUP);
 
     // Setup SD card
-    //if (!SD.begin(SD_CS)) {
-      //  tft.setTextColor(TFT_RED, TFT_BLACK);
-       // tft.drawString("SD Card Error!", 10, 10, 2);
-       // while (1);
-    //}
+  //  if (!SD.begin(SD_CS)) {
+    //tft.setTextColor(TFT_RED, TFT_BLACK);
+      //  tft.drawString("SD Card Error!", 10, 10, 2);
+        //while (1);
 
-    // Setup audio
+   // if (!SD.begin(SD_CS)) {
+     //   tft.setTextColor(TFT_RED, TFT_BLACK);
+      //  tft.drawString("SD Error! Check Card", 10, 10, 2);
+      //  Serial.println("SD Card Mount Failed. Retrying in 5 seconds...");
+    
+    //Instead of while(1), wait and then restart or retry
+   // delay(5000); 
+   // ESP.restart(); // Reboots the board to try setup() again
+
+    //Setup audio
     //audio.setVolume(10); // 0...21
+    /* if (!SD.begin(5)) {
+        Serial.println("No SD Card found, proceeding to game...");
+    } */
+    Serial.println("SD Card initialized.");
+    Serial.println("Setup complete, waiting for game start...");
 }
 
+
 void loop() {
+    if (!gameStarted) {
+        uint16_t tx = 0, ty = 0;
+        bool touched = false;
+        // Try touch if supported by TFT_eSPI
+        // getTouch returns true when screen is touched (depends on config)
+       // if (tft.getTouch(&tx, &ty)) touched = true;
+        // Also allow starting via any direction button
+        if (digitalRead(32) == LOW || digitalRead(33) == LOW || digitalRead(25) == LOW || digitalRead(26) == LOW) touched = true;
+
+        if (touched) {
+            gameStarted = true;
+            tft.fillScreen(TFT_BLACK);
+            drawGame();
+            delay(200);
+        } else {
+            delay(50);
+            return;
+        }
+    }
+
     handleInput();
     updateGame();
     drawGame();
-    delay(100);
-    audio.loop(); // Keep audio running
+    delay(1000);
+   // audio.loop(); // Keep audio running
 }
