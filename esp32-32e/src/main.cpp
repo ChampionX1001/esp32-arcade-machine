@@ -33,7 +33,7 @@ const int pelletRadius = 2;
 const int pelletDiameter = pelletRadius * 2;
 
 // Pacman rendering radius (smaller than half-cell)
-const int pacmanRadius = 16;
+const int pacmanRadius = 12;
 int pacmanX = 1, pacmanY = 1, dirX = 0, dirY = 0;
 int prevPacX = -1, prevPacY = -1; // previous Pacman position (for selective redraw)
 
@@ -335,6 +335,27 @@ void showStartScreen() {
     tft.drawString("Press Anywhere on the Screen to Play", 10, (tft.height() / 2) - 10, 2);
 }
 
+// Scan the map for remaining pellets (value 2)
+bool checkWin() {
+    for (int y = 0; y < mapHeight; ++y) {
+        for (int x = 0; x < mapWidth; ++x) {
+            if (gameMap[y][x] == 2) return false;
+        }
+    }
+    return true;
+}
+
+// Show a simple "You Win" screen (black text on green background)
+void showWinScreen() {
+    tft.fillScreen(TFT_GREEN);
+    tft.setTextColor(TFT_BLACK, TFT_GREEN);
+    tft.setTextSize(3);
+    int y = tft.height() / 2 - 12;
+    tft.drawString("YOU WIN!", 10, y, 4);
+    tft.setTextSize(2);
+    tft.drawString("Press screen to play again", 10, y + 36, 2);
+}
+
 void playWav(const char* filename) {
     audio.stopSong();
    // audio.connecttoFS(SD, filename);
@@ -368,6 +389,15 @@ void updateGame() {
             int py = pacmanY * cellSize;
             tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
             playWav("/PacManLittleDot.wav");
+
+            // Check for win condition after eating
+            if (checkWin()) {
+                Serial.println("All pellets collected - YOU WIN!");
+                showWinScreen();
+                movementEnabled = false;
+                gameStarted = false;
+                return; // stop further processing this tick
+            }
         }
 
         // Axis-aligned bounding boxes for Pacman (approximate using circle radius)
