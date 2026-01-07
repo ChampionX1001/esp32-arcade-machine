@@ -5,7 +5,6 @@
 #include <Audio.h> // ESP32-audioI2S
 #include <SD.h>
 #include <FS.h>
-#include <LittleFS.h>
 //#include <BlueGhost.h>
 //#include <RedGhost.h>
 //#include <OrangeGhost.h>
@@ -14,6 +13,13 @@
 
 // Pin definitions (adjust for your board)
 #define SD_CS 5
+
+// Analog joystick configuration (change pins to match your wiring)
+// JOY_CENTER is the mid ADC value for a resting joystick (~2048 for 12-bit ADC)
+#define JOY_X_PIN 36
+#define JOY_Y_PIN 39
+#define JOY_DEADZONE 400
+#define JOY_CENTER 2048
 
 TFT_eSPI tft = TFT_eSPI();
 Audio audio;
@@ -71,10 +77,9 @@ const int initialMap[mapHeight][mapWidth] = {
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
 };
 
-/*
 // array size is 4096
 static const unsigned short PacMan0[]  = {0,0,0,0,0,0,0,0
-,0,7,224,0
+,0,7,224,0,
 0,0,0,0
 ,0,0,0,0
 ,0,7,224,0
@@ -136,7 +141,7 @@ static const unsigned short PacMan0[]  = {0,0,0,0,0,0,0,0
 ,15,12,48,240
 ,6,0,0,96
 ,0,0,0,0};
-*/
+
 
 int gameMap[mapHeight][mapWidth];
 
@@ -145,6 +150,11 @@ bool gameStarted = false;
 
 // Game win state
 bool showingWin = false;
+
+// End-of-game freeze timer (for collisions). When true we keep the screen frozen
+// and after the timeout we show the replay screen.
+unsigned long endScreenStartMillis = 0;
+bool endScreenPending = false;
 
 // Movement & timing
 unsigned long gameStartMillis = 0;
@@ -158,11 +168,9 @@ unsigned long ghostMoveInterval = (unsigned long)(pacMoveInterval / 0.75 + 0.5);
 int ghostX[MAX_GHOSTS];
 int ghostY[MAX_GHOSTS];
 
-
-
 // Draw a ghost at grid cell (gx,gy) with color index g
 void drawGhostAt(int g, int gx, int gy) {
-    const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_BLUE };
+    const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_ORANGE, TFT_BLUE };
     int sx = gx * cellSize + 2; // small inset
     int sy = gy * cellSize + pelletDiameter; // moved up 2px earlier
     int radius = (cellSize - 4) / 2;
@@ -180,14 +188,19 @@ bool aabbOverlap(int aLeft, int aTop, int aRight, int aBottom,
     return !(aRight < bLeft || aLeft > bRight || aBottom < bTop || aTop > bBottom);
 }
 
-// Stop the game entirely after a collision
+// Forward declaration so collision handler can call the function defined later
+void showReplayScreen();
+void resetGameState();
+
+// Stop the game after a collision: freeze the current frame for 5s, then show replay screen
 void stopGameDueToCollision() {
-    Serial.println("Fatal collision: stopping game.");
+    Serial.println("Fatal collision: stopping game — freezing screen for 5s.");
     movementEnabled = false;
-    // Block the loop to stop all processing — user requested the game to stop completely
-    while (true) {
-        delay(1000);
-    }
+    gameStarted = false;
+
+    // Start the end-screen timer; the loop() will display the replay screen after the timeout
+    endScreenPending = true;
+    endScreenStartMillis = millis();
 }
 
 // Render the four ghosts using their current positions
@@ -425,18 +438,24 @@ bool checkWin() {
     return true;
 }
 
-// Show a simple "You Win" screen (black text on green background)
-void showWinScreen() {
-    tft.fillScreen(TFT_GREEN);
-    tft.setTextColor(TFT_BLACK, TFT_GREEN);
+// Show the "Press Here to Replay" screen (black text on blue background)
+void showReplayScreen() {
+    tft.fillScreen(TFT_BLUE);
+    tft.setTextColor(TFT_BLACK, TFT_BLUE);
     tft.setTextSize(3);
     int y = tft.height() / 2 - 12;
-    tft.drawString("YOU WIN!", 10, y, 4);
+    tft.drawString("Press Here to Replay", 10, y, 4);
     tft.setTextSize(2);
-    tft.drawString("Press screen to play again", 10, y + 36, 2);
+    tft.drawString("Tap the screen to play again", 10, y + 36, 2);
 
-    // Mark that the win screen is showing; wait for user touch to restart
+    // Mark that an end/replay screen is showing; loop will wait for touch to restart
     showingWin = true;
+}
+
+// Backwards-compatible: when a win occurs, show the replay screen
+void showWinScreen() {
+    Serial.println("YOU WIN!");
+    showReplayScreen();
 }
 
 void playWav(const char* filename) {
@@ -471,16 +490,34 @@ void resetGameState() {
 }
 
 void handleInput() {
-    // Example: Use buttons on GPIOs for input (replace with your actual pins)
-    //if (digitalRead(32) == LOW) { dirX = -1; dirY = 0; } // Left
-    if (digitalRead(35) == LOW) { dirX = 1; dirY = 0; } // Right (use IO35 instead of IO33 which is TOUCH_CS)
+    // First, try the analog joystick (dominant axis wins) — change pins above as needed
+    int jx = analogRead(JOY_X_PIN);
+    int jy = analogRead(JOY_Y_PIN);
+    int dx = jx - JOY_CENTER;
+    int dy = jy - JOY_CENTER;
+
+    if (abs(dx) > JOY_DEADZONE || abs(dy) > JOY_DEADZONE) {
+        // Prefer the axis with the larger deflection to get traditional 4-way controls
+        if (abs(dx) > abs(dy)) {
+            dirX = dx > 0 ? 1 : -1;
+            dirY = 0;
+        } else {
+            dirX = 0;
+            // Note: some joysticks invert Y; if Up/Down are flipped, invert the sign here
+            dirY = dy > 0 ? 1 : -1;
+        }
+        return;
+    }
+
+    // Fallback: simple digital buttons (replace pins with your actual buttons)
+    if (digitalRead(35) == LOW) { dirX = 1; dirY = 0; } // Right
+    else if (digitalRead(32) == LOW) { dirX = -1; dirY = 0; } // Left
     else if (digitalRead(25) == LOW) { dirX = 0; dirY = -1; } // Up
     else if (digitalRead(26) == LOW) { dirX = 0; dirY = 1; } // Down
     else { dirX = 0; dirY = 0; }
+
     // Play sound on a specific button (e.g., GPIO 27)
-  //  if (digitalRead(27) == LOW) {
-    //    playWav("/PacManLittleDot.wav");
-    //}
+    // if (digitalRead(27) == LOW) { playWav("/PacManLittleDot.wav"); }
 }
 
 void updateGame() {
@@ -595,6 +632,7 @@ void setup() {
     /* if (!SD.begin(5)) {
         Serial.println("No SD Card found, proceeding to game...");
     } */
+   
     Serial.println("SD Card initialized.");
     Serial.println("Setup complete, waiting for game start...");
 }
@@ -614,30 +652,37 @@ void loop() {
         
         Serial.println("Waiting for touch to start the game...");
         if (touched) {
-            gameStarted = true;
-            // Initialize ghosts one-by-one across the middle columns on row 7
-            int targetCenter = mapWidth / 2;
-            int spawnCols[4] = { targetCenter - 2, targetCenter - 1, targetCenter, targetCenter + 1 };
-            for (int g = 0; g < MAX_GHOSTS; ++g) {
-                ghostX[g] = spawnCols[g];
-                ghostY[g] = 7; // row 7
-                Serial.printf("ghost %d spawned at (%d,%d)\n", g, ghostX[g], ghostY[g]);
+            // If we're showing the replay/win screen, touching should reset the game state
+            if (showingWin) {
+                Serial.println("Touch on replay screen: resetting game state...");
+                resetGameState();
+                delay(200); // small debounce
+            } else {
+                gameStarted = true;
+                // Initialize ghosts one-by-one across the middle columns on row 7
+                int targetCenter = mapWidth / 2;
+                int spawnCols[4] = { targetCenter - 2, targetCenter - 1, targetCenter, targetCenter + 1 };
+                for (int g = 0; g < MAX_GHOSTS; ++g) {
+                    ghostX[g] = spawnCols[g];
+                    ghostY[g] = 7; // row 7
+                    Serial.printf("ghost %d spawned at (%d,%d)\n", g, ghostX[g], ghostY[g]);
+                }
+
+                // Draw full static map once, then ghosts and Pacman
+                drawMapOnce();
+                for (int g = 0; g < MAX_GHOSTS; ++g) drawGhostAt(g, ghostX[g], ghostY[g]);
+                prevPacX = -1; // signal drawGame() to perform first-draw path
+                drawGame();
+
+                // Start delay timer: movement will begin after 10 seconds
+                gameStartMillis = millis();
+                movementEnabled = false;
+                lastPacMove = gameStartMillis; // prevent Pacman from moving during the 10s pre-move phase
+                lastGhostMove = gameStartMillis; // maintain ghost timing
+                Serial.println("Game started: movement will begin in 10 seconds...");
+
+                delay(200);
             }
-
-            // Draw full static map once, then ghosts and Pacman
-            drawMapOnce();
-            for (int g = 0; g < MAX_GHOSTS; ++g) drawGhostAt(g, ghostX[g], ghostY[g]);
-            prevPacX = -1; // signal drawGame() to perform first-draw path
-            drawGame();
-
-            // Start delay timer: movement will begin after 10 seconds
-            gameStartMillis = millis();
-            movementEnabled = false;
-            lastPacMove = gameStartMillis; // prevent Pacman from moving during the 10s pre-move phase
-            lastGhostMove = gameStartMillis; // maintain ghost timing
-            Serial.println("Game started: movement will begin in 10 seconds...");
-
-            delay(200);
         } else {
             Serial.println("No touch detected, still waiting...");
             delay(50);
@@ -649,6 +694,19 @@ void loop() {
     handleInput();
 
     unsigned long now = millis();
+
+    // If a collision happened and we are in the pending freeze, check timer and show replay screen after 5s
+    if (endScreenPending) {
+        if (now - endScreenStartMillis >= 5000UL) {
+            endScreenPending = false;
+            Serial.println("End of freeze: showing replay screen");
+            showReplayScreen();
+        } else {
+            // Still in the frozen period: do nothing and keep the screen as-is
+            delay(50);
+            return;
+        }
+    }
 
     // If the game has started but movement hasn't been enabled yet, check the 10s delay
     if (gameStarted && !movementEnabled) {
