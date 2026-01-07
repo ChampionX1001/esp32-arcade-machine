@@ -98,6 +98,22 @@ void drawGhostAt(int g, int gx, int gy) {
     tft.fillCircle(cx + radius/3, cy - radius/3, max(1, radius/6), TFT_BLACK);
 }
 
+// Axis-aligned bounding box overlap test (inclusive)
+bool aabbOverlap(int aLeft, int aTop, int aRight, int aBottom,
+                 int bLeft, int bTop, int bRight, int bBottom) {
+    return !(aRight < bLeft || aLeft > bRight || aBottom < bTop || aTop > bBottom);
+}
+
+// Stop the game entirely after a collision
+void stopGameDueToCollision() {
+    Serial.println("Fatal collision: stopping game.");
+    movementEnabled = false;
+    // Block the loop to stop all processing — user requested the game to stop completely
+    while (true) {
+        delay(1000);
+    }
+}
+
 // Render the four ghosts using their current positions
 void renderGhostsInCenter() {
     for (int g = 0; g < MAX_GHOSTS; ++g) {
@@ -205,6 +221,25 @@ void moveGhostsStep() {
         ghostY[g] = bestNy;
         // Draw ghost at new position
         drawGhostAt(g, ghostX[g], ghostY[g]);
+
+        // Check collision with Pacman using AABB
+        int pCx = pacmanX * cellSize + cellSize/2;
+        int pCy = pacmanY * cellSize + cellSize/2 + pelletDiameter;
+        int pR = pacmanRadius;
+        int pLeft = pCx - pR; int pRight = pCx + pR;
+        int pTop = pCy - pR; int pBottom = pCy + pR;
+
+        int gsx = ghostX[g] * cellSize + 2;
+        int gsy = ghostY[g] * cellSize + pelletDiameter;
+        int gR = (cellSize - 4) / 2;
+        int gLeft = gsx; int gRight = gsx + 2 * gR;
+        int gTop = gsy; int gBottom = gsy + 2 * gR;
+
+        if (aabbOverlap(pLeft, pTop, pRight, pBottom, gLeft, gTop, gRight, gBottom)) {
+            Serial.printf("Collision: ghost %d at (%d,%d) collided with Pacman\n", g, ghostX[g], ghostY[g]);
+            stopGameDueToCollision();
+            return; // abort remaining ghost moves
+        }
     }
 }
 
@@ -333,6 +368,27 @@ void updateGame() {
             int py = pacmanY * cellSize;
             tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
             playWav("/PacManLittleDot.wav");
+        }
+
+        // Axis-aligned bounding boxes for Pacman (approximate using circle radius)
+        int pCx = pacmanX * cellSize + cellSize/2;
+        int pCy = pacmanY * cellSize + cellSize/2 + pelletDiameter;
+        int pR = pacmanRadius;
+        int pLeft = pCx - pR; int pRight = pCx + pR;
+        int pTop = pCy - pR; int pBottom = pCy + pR;
+
+        // Check collision against all ghosts
+        for (int g = 0; g < MAX_GHOSTS; ++g) {
+            int gsx = ghostX[g] * cellSize + 2;
+            int gsy = ghostY[g] * cellSize + pelletDiameter;
+            int gR = (cellSize - 4) / 2;
+            int gLeft = gsx; int gRight = gsx + 2 * gR;
+            int gTop = gsy; int gBottom = gsy + 2 * gR;
+            if (aabbOverlap(pLeft, pTop, pRight, pBottom, gLeft, gTop, gRight, gBottom)) {
+                Serial.printf("Collision: Pacman at (%d,%d) collided with ghost %d\n", pacmanX, pacmanY, g);
+                stopGameDueToCollision();
+                return;
+            }
         }
     }
 }
