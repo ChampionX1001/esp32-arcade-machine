@@ -6,6 +6,10 @@
 #include <SD.h>
 #include <FS.h>
 #include <LittleFS.h>
+//#include <BlueGhost.h>
+//#include <RedGhost.h>
+//#include <OrangeGhost.h>
+//#include <WhiteGhost.h>
 
 
 // Pin definitions (adjust for your board)
@@ -44,7 +48,7 @@ int pacAnimCounter = 0;
 const int pacAnimThreshold = 3; // lower = faster animation
 bool pacMouthOpen = true;
 int lastDirX = 1, lastDirY = 0; // last non-zero direction (defaults right)
-int gameMap[mapHeight][mapWidth] = {
+const int initialMap[mapHeight][mapWidth] = {
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
     {1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1},
     {1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1},
@@ -67,8 +71,80 @@ int gameMap[mapHeight][mapWidth] = {
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
 };
 
+/*
+// array size is 4096
+static const unsigned short PacMan0[]  = {0,0,0,0,0,0,0,0
+,0,7,224,0
+0,0,0,0
+,0,0,0,0
+,0,7,224,0
+,0,63,252,0
+,0,255,255,0
+,1,255,255,128
+,7,255,255,224
+,15,255,255,240
+,15,255,255,240
+,31,255,255,248
+,31,255,255,248
+,31,255,255,248
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,31,191,253,248
+,31,158,121,248
+,15,12,48,240
+,6,0,0,96
+,0,0,0,0
+,0,63,252,0
+,0,255,255,0
+,1,255,255,128
+,7,255,255,224
+,15,255,255,240
+,15,255,255,240
+,31,255,255,248
+,31,255,255,248
+,31,255,255,248
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,31,191,253,248
+,31,158,121,248
+,15,12,48,240
+,6,0,0,96
+,0,0,0,0};
+*/
+
+int gameMap[mapHeight][mapWidth];
+
 // Game state
 bool gameStarted = false;
+
+// Game win state
+bool showingWin = false;
 
 // Movement & timing
 unsigned long gameStartMillis = 0;
@@ -332,7 +408,11 @@ void showStartScreen() {
     tft.setTextColor(TFT_WHITE, TFT_BLUE);
     tft.setTextSize(2);
     // Exact text requested by user
-    tft.drawString("Press Anywhere on the Screen to Play", 10, (tft.height() / 2) - 10, 2);
+   // tft.drawString("Press Anywhere on the Screen to Play", 10, (tft.height() / 2) - 10, 2);
+    tft.println("Hello, ESP32!");
+
+    // Reset any win state
+    showingWin = false;
 }
 
 // Scan the map for remaining pellets (value 2)
@@ -354,11 +434,40 @@ void showWinScreen() {
     tft.drawString("YOU WIN!", 10, y, 4);
     tft.setTextSize(2);
     tft.drawString("Press screen to play again", 10, y + 36, 2);
+
+    // Mark that the win screen is showing; wait for user touch to restart
+    showingWin = true;
 }
 
 void playWav(const char* filename) {
     audio.stopSong();
    // audio.connecttoFS(SD, filename);
+}
+
+// Reset game state and start a new game
+void resetGameState() {
+    // restore pellets and walls
+    for (int y = 0; y < mapHeight; ++y) for (int x = 0; x < mapWidth; ++x) gameMap[y][x] = initialMap[y][x];
+    // reset Pacman position
+    pacmanX = 1; pacmanY = 1; dirX = 0; dirY = 0; prevPacX = -1; prevPacY = -1;
+    // reset ghosts to row 7 middle columns
+    int targetCenter = mapWidth / 2;
+    int spawnCols[4] = { targetCenter - 2, targetCenter - 1, targetCenter, targetCenter + 1 };
+    for (int g = 0; g < MAX_GHOSTS; ++g) { ghostX[g] = spawnCols[g]; ghostY[g] = 7; }
+
+    // Draw new map and entities
+    drawMapOnce();
+    for (int g = 0; g < MAX_GHOSTS; ++g) drawGhostAt(g, ghostX[g], ghostY[g]);
+    drawGame();
+
+    // Start the game delay again
+    gameStarted = true;
+    movementEnabled = false;
+    gameStartMillis = millis();
+    lastPacMove = gameStartMillis;
+    lastGhostMove = gameStartMillis;
+    Serial.println("Game restarted after win.");
+    showingWin = false;
 }
 
 void handleInput() {
@@ -433,29 +542,7 @@ void setup() {
     tft.init(); // Initialize with ST7796 driver
     tft.setRotation(1);
 
-    // Pacman rendering sprite will be created as FRAME_W x FRAME_H after loading the sheet
-
-    // Diagnostic prints
-   // Serial.print("TFT width="); Serial.print(tft.width());
-    //Serial.print(" height="); Serial.println(tft.height());
-
-    // Print the pin macros from User_Setup.h for verification
-   // Serial.print("TFT pins MOSI="); Serial.print(TFT_MOSI);
-   // Serial.print(" SCLK="); Serial.print(TFT_SCLK);
-    //Serial.print(" MISO="); Serial.print(TFT_MISO);
-    //Serial.print(" CS="); Serial.print(TFT_CS);
-   // Serial.print(" DC="); Serial.print(TFT_DC);
-   // Serial.print(" BL="); Serial.println(TFT_BL);
-
-    // Draw a center pixel and a small rect to check drawing commands
-    //int cx = tft.width() / 2;
-   // int cy = tft.height() / 2;
-  //  Serial.print("Drawing center pixel at "); Serial.print(cx); Serial.print(","); Serial.println(cy);
-  //  tft.drawPixel(cx, cy, TFT_WHITE);
-  //  delay(200);
-  //  tft.fillRect(cx - 30, cy - 20, 60, 40, TFT_YELLOW);
-  //  delay(500);
-
+   
     // Toggle backlight to verify polarity (GPIO27 used as BL on this board)
     pinMode(27, OUTPUT);
     Serial.println("Toggling BL (GPIO27) to test backlight polarity");
@@ -463,12 +550,8 @@ void setup() {
     delay(200);
     digitalWrite(27, HIGH);
     delay(200);
-    digitalWrite(27, LOW);
-    //delay(200);
-    //digitalWrite(27, HIGH);
-    //delay(200);
-   // digitalWrite(27, LOW);
-   // delay(200);
+    // Leave backlight on so the start screen is visible
+    digitalWrite(27, HIGH);
     
     //Draw a small test rectangle to check drawing commands
     tft.fillRect(10, 10, 100, 50, TFT_YELLOW);
@@ -476,6 +559,9 @@ void setup() {
  // PNG functionality removed; use procedural sprites (no file loading)
 
     showStartScreen();
+
+    // Initialize gameMap from initialMap so the map is populated and will render
+    for (int y = 0; y < mapHeight; ++y) for (int x = 0; x < mapWidth; ++x) gameMap[y][x] = initialMap[y][x];
 
     // Touch diagnostics: check IRQ pin and poll getTouch()
     pinMode(TOUCH_IRQ, INPUT_PULLUP);
@@ -513,7 +599,6 @@ void setup() {
     Serial.println("Setup complete, waiting for game start...");
 }
 
-
 void loop() {
     if (!gameStarted) {
         uint16_t tx = 0, ty = 0;
@@ -526,7 +611,6 @@ void loop() {
             touched = true;}
         // Also allow starting via any direction button
         //if (digitalRead(32) == LOW || digitalRead(33) == LOW || digitalRead(25) == LOW || digitalRead(26) == LOW) touched = true;
-        
         
         Serial.println("Waiting for touch to start the game...");
         if (touched) {
@@ -573,6 +657,20 @@ void loop() {
             lastPacMove = now;
             lastGhostMove = now;
             Serial.println("Movement enabled — Pacman and ghosts will now start moving");
+        }
+    }
+
+    // If we are showing the win screen, wait for touch to restart
+    if (showingWin) {
+        uint16_t tx = 0, ty = 0;
+        if (tft.getTouch(&tx, &ty)) {
+            // User touched screen — restart game
+            resetGameState();
+            // proceed with the loop (resetGameState sets gameStarted)
+        } else {
+            // keep showing win screen
+            delay(50);
+            return;
         }
     }
 
