@@ -10,13 +10,9 @@
 //#include <OrangeGhost.h>
 //#include <WhiteGhost.h>
 #include <Adafruit_NeoPixel.h>
-#include <DFRobotDFPlayerMini.h>
-#include <esp_system.h>
+#include <esp_system.h> // DFPlayer removed; audio playback disabled
 
-// DFPlayer: use hardware UART (Serial2) to avoid colliding with USB serial
-// Change these if your board uses different pins for the UART header
-#define DFPLAYER_RX_PIN 3
-#define DFPLAYER_TX_PIN 1
+// DFPlayer removed; no UART pins required
 
 // Pin definitions (adjust for your board)
 #define SD_CS 5
@@ -25,7 +21,7 @@
 // JOY_CENTER is the mid ADC value for a resting joystick (~2048 for 12-bit ADC)
 #define JOY_X_PIN 35
 #define JOY_Y_PIN 39
-#define JOY_DEADZONE 400
+#define JOY_DEADZONE 100 // lowered for sensitivity testing (was 200)
 #define JOY_CENTER 2048
 #define LED_PIN    21    // Digital pin connected to the NeoPixels
 #define LED_COUNT 144     // Number of LEDs in your strip/ring (change as needed)
@@ -47,11 +43,8 @@ Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_RGB + NEO_KHZ800); // For RGB pi
 #define MAX_GHOSTS 4
 const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_BLUE };
 
-// Define pins for SoftwareSerial (RX, TX)
-SoftwareSerial mySoftwareSerial(DFPLAYER_RX_PIN, DFPLAYER_TX_PIN); 
-DFRobotDFPlayerMini myDFPlayer;
-bool audioAvailable = false;
-bool dfPlayerAvailable = false;
+// DFPlayer removed; audio playback via DFPlayer is disabled
+bool audioAvailable = false; // reserved (no DFPlayer) // keep 'audio' variable for other audio backends if needed
 
 // Pacman game map
 const int cellSize = 16;
@@ -626,6 +619,15 @@ void setup() {
     pinMode(25, INPUT_PULLUP);
     pinMode(26, INPUT_PULLUP);
 
+    // Configure ADC attenuation so full 0..3.3V maps across 0..4095
+    analogSetPinAttenuation(JOY_X_PIN, ADC_11db);
+    analogSetPinAttenuation(JOY_Y_PIN, ADC_11db);
+
+    // Joystick rest baseline (use these numbers to calibrate JOY_CENTER/JOY_DEADZONE)
+    int jx0 = analogRead(JOY_X_PIN);
+    int jy0 = analogRead(JOY_Y_PIN);
+    Serial.printf("Joystick rest baseline: jx=%d jy=%d (JOY_CENTER=%d deadzone=%d)\n", jx0, jy0, JOY_CENTER, JOY_DEADZONE);
+
     //Instead of while(1), wait and then restart or retry
    // delay(5000); 
    // ESP.restart(); // Reboots the board to try setup() again
@@ -636,19 +638,7 @@ void setup() {
         Serial.println("No SD Card found, proceeding to game...");
     } */
 
-    // Initialize DFPlayer serial (non-blocking; continue if not present)
-    // Initialize Serial2 (UART2) for DFPlayer; pins can be changed above
-    Serial2.begin(9600, SERIAL_8N1, DFPLAYER_RX_PIN, DFPLAYER_TX_PIN);
-    delay(100);
-    Serial.println(F("Attempting DFPlayer initialization on Serial2..."));
-    if (myDFPlayer.begin(Serial2)) {
-        dfplayerAvailable = true;
-        myDFPlayer.volume(20); // Set volume (0 to 30)
-        Serial.println(F("DFPlayer initialized"));
-    } else {
-        dfplayerAvailable = false;
-        Serial.println(F("DFPlayer init failed; continuing without audio"));
-    }
+    // DFPlayer removed - skipping DFPlayer UART init
     Serial.println("SD Card initialized.");
     Serial.println("Setup complete, waiting for game start...");
 }
@@ -687,19 +677,8 @@ void loop() {
         if (touched) {
             Serial.println(F("Touch detected — starting game..."));
 
-            mySoftwareSerial.begin(9600); // DFPlayer Mini uses 9600 baud
-
-            Serial.println(F("Initializing DFPlayer..."));
-
-            if (!myDFPlayer.begin(mySoftwareSerial)) { 
-                Serial.println(F("Unable to begin. Check connections/SD card."));
-                // proceed without audio instead of hanging
-                audioAvailable = false;
-            } else {
-                audioAvailable = true;
-                myDFPlayer.volume(20); // Set volume (0 to 30)
-                myDFPlayer.playFolder(1, 1); // Play first song
-            }
+            // Audio playback disabled (DFPlayer removed)
+            Serial.println(F("Audio playback disabled; skipping audio"));
             
             // If we're showing the replay/win screen, touching should reset the game state
             if (showingWin) {
