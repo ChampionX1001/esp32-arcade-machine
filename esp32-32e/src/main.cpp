@@ -10,8 +10,11 @@
 //#include <OrangeGhost.h>
 //#include <WhiteGhost.h>
 #include <Adafruit_NeoPixel.h>
-#include <SoftwareSerial.h>
 #include <DFRobotDFPlayerMini.h>
+// DFPlayer: use hardware UART (Serial2) to avoid colliding with USB serial
+// Change these if your board uses different pins for the UART header
+#define DFPLAYER_RX_PIN 3
+#define DFPLAYER_TX_PIN 1
 
 
 // Pin definitions (adjust for your board)
@@ -23,8 +26,8 @@
 #define JOY_Y_PIN 39
 #define JOY_DEADZONE 400
 #define JOY_CENTER 2048
-#define LED_PIN    6    // Digital pin connected to the NeoPixels
-#define LED_COUNT 1     // Number of LEDs in your strip/ring (change as needed)
+#define LED_PIN    21    // Digital pin connected to the NeoPixels
+#define LED_COUNT 144     // Number of LEDs in your strip/ring (change as needed)
 
 
 TFT_eSPI tft = TFT_eSPI();
@@ -32,8 +35,9 @@ Audio audio;
 
 // Parameter 1 = number of pixels, Parameter 2 = pin number, Parameter 3 = pixel type flags
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_RGB + NEO_KHZ800); // For RGB pixels
-SoftwareSerial mySoftwareSerial(2, 3); // RX, TX (connects to TX, RX of DFPlayer)
 DFRobotDFPlayerMini myDFPlayer;
+bool dfplayerAvailable = false; // true when DFPlayer initializes successfully
+
 
 #define FRAME_W 32
 #define FRAME_H 32
@@ -42,11 +46,6 @@ DFRobotDFPlayerMini myDFPlayer;
 
 #define MAX_GHOSTS 4
 const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_BLUE };
-
-// Define pins for SoftwareSerial (RX, TX)
-// Connect Uno Pin 10 to DFPlayer TX, Pin 11 to DFPlayer RX
-SoftwareSerial mySoftwareSerial(10, 11); 
-DFRobotDFPlayerMini myDFPlayer;
 
 // Pacman game map
 const int cellSize = 16;
@@ -602,6 +601,20 @@ void setup() {
     /* if (!SD.begin(5)) {
         Serial.println("No SD Card found, proceeding to game...");
     } */
+
+    // Initialize DFPlayer serial (non-blocking; continue if not present)
+    // Initialize Serial2 (UART2) for DFPlayer; pins can be changed above
+    Serial2.begin(9600, SERIAL_8N1, DFPLAYER_RX_PIN, DFPLAYER_TX_PIN);
+    delay(100);
+    Serial.println(F("Attempting DFPlayer initialization on Serial2..."));
+    if (myDFPlayer.begin(Serial2)) {
+        dfplayerAvailable = true;
+        myDFPlayer.volume(20); // Set volume (0 to 30)
+        Serial.println(F("DFPlayer initialized"));
+    } else {
+        dfplayerAvailable = false;
+        Serial.println(F("DFPlayer init failed; continuing without audio"));
+    }
     Serial.println("SD Card initialized.");
     Serial.println("Setup complete, waiting for game start...");
 }
@@ -630,18 +643,13 @@ void loop() {
         
         Serial.println("Waiting for touch to start the game...");
         if (touched) {
-            mySoftwareSerial.begin(9600); // DFPlayer Mini uses 9600 baud
-            Serial.begin(115200);         // For debugging
+            Serial.println(F("Touch detected — starting game..."));
 
-            Serial.println(F("Initializing DFPlayer..."));
-
-            if (!myDFPlayer.begin(mySoftwareSerial)) { 
-                Serial.println(F("Unable to begin. Check connections/SD card."));
-                while(true); 
+            if (dfplayerAvailable) {
+                myDFPlayer.playFolder(1, 1);    // Play first song
+            } else {
+                Serial.println(F("DFPlayer unavailable; continuing without audio"));
             }
-  
-            myDFPlayer.volume(20); // Set volume (0 to 30)
-            myDFPlayer.play(1);    // Play first song
             
             // If we're showing the replay/win screen, touching should reset the game state
             if (showingWin) {
