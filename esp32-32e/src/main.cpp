@@ -12,18 +12,18 @@
 #include <Adafruit_NeoPixel.h>
 #include <SoftwareSerial.h>
 #include <DFRobotDFPlayerMini.h>
-
+#include <esp_system.h>
 
 // Pin definitions (adjust for your board)
 #define SD_CS 5
 
 // Analog joystick configuration (change pins to match your wiring)
 // JOY_CENTER is the mid ADC value for a resting joystick (~2048 for 12-bit ADC)
-#define JOY_X_PIN 36
+#define JOY_X_PIN 35
 #define JOY_Y_PIN 39
 #define JOY_DEADZONE 400
 #define JOY_CENTER 2048
-#define LED_PIN    6    // Digital pin connected to the NeoPixels
+#define LED_PIN    4    // Digital pin connected to the NeoPixels (avoid 6-11 which are SPI flash pins)
 #define LED_COUNT 1     // Number of LEDs in your strip/ring (change as needed)
 
 
@@ -32,8 +32,8 @@ Audio audio;
 
 // Parameter 1 = number of pixels, Parameter 2 = pin number, Parameter 3 = pixel type flags
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_RGB + NEO_KHZ800); // For RGB pixels
-SoftwareSerial mySoftwareSerial(2, 3); // RX, TX (connects to TX, RX of DFPlayer)
-DFRobotDFPlayerMini myDFPlayer;
+//SoftwareSerial mySoftwareSerial(2, 3); // RX, TX (connects to TX, RX of DFPlayer)
+//DFRobotDFPlayerMini myDFPlayer;
 
 #define FRAME_W 32
 #define FRAME_H 32
@@ -47,6 +47,7 @@ const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_
 // Connect Uno Pin 10 to DFPlayer TX, Pin 11 to DFPlayer RX
 SoftwareSerial mySoftwareSerial(10, 11); 
 DFRobotDFPlayerMini myDFPlayer;
+bool audioAvailable = false;
 
 // Pacman game map
 const int cellSize = 16;
@@ -538,12 +539,14 @@ void updateGame() {
 void setup() {
     Serial.begin(115200);
     delay(1000);
+    Serial.printf("Reset reason: %d\n", esp_reset_reason());
     Serial.println("--- BOOT SUCCESSFUL ---");
-    boolean x = !SD.begin(5); 
-    Serial.println(x);
+    bool sdok = SD.begin(5);
+    Serial.print("SD.begin: "); Serial.println(sdok ? 1 : 0);
 
-    Serial.println("TFT is initialized");
+    Serial.println("TFT init starting");
     tft.init(); // Initialize with ST7796 driver
+    Serial.println("TFT init done");
     strip.begin();             // Initialize NeoPixel library
     strip.show();              // Initialize all pixels to 'off'
     strip.setBrightness(50);   // Set brightness (0-255)
@@ -576,6 +579,7 @@ void setup() {
     Serial.println(digitalRead(TOUCH_IRQ));
     Serial.println("Touch the screen now — polling for getTouch() for 5 seconds...");
     unsigned long st = millis();
+    unsigned long lastPrint = st;
     while (millis() - st < 5000) {
         uint16_t tx = 0, ty = 0;
         // Print IRQ pin state for visibility
@@ -584,7 +588,12 @@ void setup() {
             Serial.print("getTouch TRUE: "); Serial.print(tx); Serial.print(","); Serial.println(ty);
             break;
         }
-        delay(200);
+        // Periodic status so we can see progress without flooding the log
+        if (millis() - lastPrint >= 1000) {
+            Serial.println("touch poll still waiting...");
+            lastPrint = millis();
+        }
+        delay(10); // short wait to yield and keep watchdog happy
     }
     delay(2000);
 
@@ -607,15 +616,23 @@ void setup() {
 }
 
 void loop() {
-     // Set the first pixel (index 0) to red (255,0,0)
+    Serial.println("loop start");
+    // Quick debug touch poll to catch touches even during other delays
+    uint16_t dbgTx = 0, dbgTy = 0;
+    if (tft.getTouch(&dbgTx, &dbgTy)) {
+        Serial.print("DBG getTouch at "); Serial.print(dbgTx); Serial.print(","); Serial.print(dbgTy);
+        Serial.print(" IRQ="); Serial.println(digitalRead(TOUCH_IRQ));
+    }
+
+    // Small NeoPixel blink (short delays to remain responsive to touch)
     strip.setPixelColor(0, strip.Color(255, 0, 0));
     strip.show(); // Send the data to the pixels
-    delay(1000);  // Wait 1 second
+    delay(200);  // shorter wait to improve responsiveness
 
     // Turn the first pixel off (0,0,0)
     strip.setPixelColor(0, strip.Color(0, 0, 0));
     strip.show();
-    delay(1000);
+    delay(200);
     if (!gameStarted) {
         uint16_t tx = 0, ty = 0;
         bool touched = false;
@@ -631,17 +648,18 @@ void loop() {
         Serial.println("Waiting for touch to start the game...");
         if (touched) {
             mySoftwareSerial.begin(9600); // DFPlayer Mini uses 9600 baud
-            Serial.begin(115200);         // For debugging
 
             Serial.println(F("Initializing DFPlayer..."));
 
             if (!myDFPlayer.begin(mySoftwareSerial)) { 
                 Serial.println(F("Unable to begin. Check connections/SD card."));
-                while(true); 
+                // proceed without audio instead of hanging
+                audioAvailable = false;
+            } else {
+                audioAvailable = true;
+                myDFPlayer.volume(20); // Set volume (0 to 30)
+                myDFPlayer.play(1);    // Play first song
             }
-  
-            myDFPlayer.volume(20); // Set volume (0 to 30)
-            myDFPlayer.play(1);    // Play first song
             
             // If we're showing the replay/win screen, touching should reset the game state
             if (showingWin) {
