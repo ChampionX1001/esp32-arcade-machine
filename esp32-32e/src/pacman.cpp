@@ -9,9 +9,6 @@
 //#include <RedGhost.h>
 //#include <OrangeGhost.h>
 //#include <WhiteGhost.h>
-#include <Adafruit_NeoPixel.h>
-#include <SoftwareSerial.h>
-#include <DFRobotDFPlayerMini.h>
 
 
 // Pin definitions (adjust for your board)
@@ -23,17 +20,9 @@
 #define JOY_Y_PIN 39
 #define JOY_DEADZONE 400
 #define JOY_CENTER 2048
-#define LED_PIN    6    // Digital pin connected to the NeoPixels
-#define LED_COUNT 1     // Number of LEDs in your strip/ring (change as needed)
-
 
 TFT_eSPI tft = TFT_eSPI();
 Audio audio;
-
-// Parameter 1 = number of pixels, Parameter 2 = pin number, Parameter 3 = pixel type flags
-Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_RGB + NEO_KHZ800); // For RGB pixels
-SoftwareSerial mySoftwareSerial(2, 3); // RX, TX (connects to TX, RX of DFPlayer)
-DFRobotDFPlayerMini myDFPlayer;
 
 #define FRAME_W 32
 #define FRAME_H 32
@@ -42,11 +31,6 @@ DFRobotDFPlayerMini myDFPlayer;
 
 #define MAX_GHOSTS 4
 const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_BLUE };
-
-// Define pins for SoftwareSerial (RX, TX)
-// Connect Uno Pin 10 to DFPlayer TX, Pin 11 to DFPlayer RX
-SoftwareSerial mySoftwareSerial(10, 11); 
-DFRobotDFPlayerMini myDFPlayer;
 
 // Pacman game map
 const int cellSize = 16;
@@ -94,20 +78,69 @@ const int initialMap[mapHeight][mapWidth] = {
 };
 
 // array size is 4096
-static const unsigned short PacMan0[]  = {0,0,0,0,0,0,0,0,0,7,224,0,
-0,0,0,0,0,0,0,0,0,7,224,0,0,63,252,0,0,255,255,0,1,255,255,128,7,255,
-255,224,15,255,255,240,15,255,255,240,31,255,255,248,31,255,255,248
-,31,255,255,248,63,255,255,252,63,255,255,252,63,255,255,252,63,255,
-255,252,63,255,255,252,63,255,255,252,63,255,255,252,63,255,255,252
-,63,255,255,252,63,255,255,252,63,255,255,252,63,255,255,252,63,255,
-255,252,63,255,255,252,63,255,255,252,31,191,253,248,31,158,121,248
-,15,12,48,240,6,0,0,96,0,0,0,0,0,63,252,0,0,255,255,0,1,255,255,128
-,7,255,255,224,15,255,255,240,15,255,255,240,31,255,255,248,31,255,
-255,248,31,255,255,248,63,255,255,252,63,255,255,252,63,255,255,252
-,63,255,255,252,63,255,255,252,63,255,255,252,63,255,255,252,63,255,
-255,252,63,255,255,252,63,255,255,252,63,255,255,252,63,255,255,252
-,63,255,255,252,63,255,255,252,63,255,255,252,31,191,253,248,31,158,
-121,248,15,12,48,240,6,0,0,96,0,0,0,0};
+static const unsigned short PacMan0[]  = {0,0,0,0,0,0,0,0
+,0,7,224,0,
+0,0,0,0
+,0,0,0,0
+,0,7,224,0
+,0,63,252,0
+,0,255,255,0
+,1,255,255,128
+,7,255,255,224
+,15,255,255,240
+,15,255,255,240
+,31,255,255,248
+,31,255,255,248
+,31,255,255,248
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,31,191,253,248
+,31,158,121,248
+,15,12,48,240
+,6,0,0,96
+,0,0,0,0
+,0,63,252,0
+,0,255,255,0
+,1,255,255,128
+,7,255,255,224
+,15,255,255,240
+,15,255,255,240
+,31,255,255,248
+,31,255,255,248
+,31,255,255,248
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,63,255,255,252
+,31,191,253,248
+,31,158,121,248
+,15,12,48,240
+,6,0,0,96
+,0,0,0,0};
 
 
 int gameMap[mapHeight][mapWidth];
@@ -501,6 +534,7 @@ void updateGame() {
             int px = pacmanX * cellSize;
             int py = pacmanY * cellSize;
             tft.fillRect(px, py, cellSize, cellSize, TFT_BLACK);
+            playWav("/PacManLittleDot.wav");
 
             // Check for win condition after eating
             if (checkWin()) {
@@ -544,9 +578,6 @@ void setup() {
 
     Serial.println("TFT is initialized");
     tft.init(); // Initialize with ST7796 driver
-    strip.begin();             // Initialize NeoPixel library
-    strip.show();              // Initialize all pixels to 'off'
-    strip.setBrightness(50);   // Set brightness (0-255)
     tft.setRotation(1);
 
    
@@ -607,15 +638,6 @@ void setup() {
 }
 
 void loop() {
-     // Set the first pixel (index 0) to red (255,0,0)
-    strip.setPixelColor(0, strip.Color(255, 0, 0));
-    strip.show(); // Send the data to the pixels
-    delay(1000);  // Wait 1 second
-
-    // Turn the first pixel off (0,0,0)
-    strip.setPixelColor(0, strip.Color(0, 0, 0));
-    strip.show();
-    delay(1000);
     if (!gameStarted) {
         uint16_t tx = 0, ty = 0;
         bool touched = false;
@@ -630,19 +652,6 @@ void loop() {
         
         Serial.println("Waiting for touch to start the game...");
         if (touched) {
-            mySoftwareSerial.begin(9600); // DFPlayer Mini uses 9600 baud
-            Serial.begin(115200);         // For debugging
-
-            Serial.println(F("Initializing DFPlayer..."));
-
-            if (!myDFPlayer.begin(mySoftwareSerial)) { 
-                Serial.println(F("Unable to begin. Check connections/SD card."));
-                while(true); 
-            }
-  
-            myDFPlayer.volume(20); // Set volume (0 to 30)
-            myDFPlayer.play(1);    // Play first song
-            
             // If we're showing the replay/win screen, touching should reset the game state
             if (showingWin) {
                 Serial.println("Touch on replay screen: resetting game state...");
