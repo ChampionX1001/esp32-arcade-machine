@@ -8,6 +8,8 @@ Power: 5V INUI Power Bank, from a breadboar's power rails into the Hosyond board
 
 TFT LCD Diplay: Built into the Hosyond board using ST7796S driver
 
+This board's pin assignment is given here: https://www.lcdwiki.com/4.0inch_ESP32-32E_Display#Product_Documents
+
 ## Audio
 
 DFPlayer Mini: Conntected to Hosyond board's UART Serial Port
@@ -25,4 +27,4 @@ These files are named by the description of their sound. For example, "<b>pacman
 
 ## Output
 
-There is WS2812B LED light strip in the circuit, with 144 LEDs in series. The Data In cable for the LED strip is connected to GPIO 23 (MOSI) of Hosyond board.
+There is WS2812B LED light strip in the circuit, with 144 LEDs in series. The Data In cable for the LED strip is connected to GPIO 21 (CS) of Hosyond board.
