@@ -11,18 +11,19 @@
 //#include <WhiteGhost.h>
 #include <Adafruit_NeoPixel.h>
 #include <DFRobotDFPlayerMini.h>
+#include <esp_system.h>
+
 // DFPlayer: use hardware UART (Serial2) to avoid colliding with USB serial
 // Change these if your board uses different pins for the UART header
 #define DFPLAYER_RX_PIN 3
 #define DFPLAYER_TX_PIN 1
-
 
 // Pin definitions (adjust for your board)
 #define SD_CS 5
 
 // Analog joystick configuration (change pins to match your wiring)
 // JOY_CENTER is the mid ADC value for a resting joystick (~2048 for 12-bit ADC)
-#define JOY_X_PIN 36
+#define JOY_X_PIN 35
 #define JOY_Y_PIN 39
 #define JOY_DEADZONE 400
 #define JOY_CENTER 2048
@@ -35,9 +36,8 @@ Audio audio;
 
 // Parameter 1 = number of pixels, Parameter 2 = pin number, Parameter 3 = pixel type flags
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_RGB + NEO_KHZ800); // For RGB pixels
-DFRobotDFPlayerMini myDFPlayer;
-bool dfplayerAvailable = false; // true when DFPlayer initializes successfully
-
+//SoftwareSerial mySoftwareSerial(2, 3); // RX, TX (connects to TX, RX of DFPlayer)
+//DFRobotDFPlayerMini myDFPlayer;
 
 #define FRAME_W 32
 #define FRAME_H 32
@@ -46,6 +46,12 @@ bool dfplayerAvailable = false; // true when DFPlayer initializes successfully
 
 #define MAX_GHOSTS 4
 const uint16_t fallbackColor[MAX_GHOSTS] = { TFT_WHITE, TFT_RED, TFT_GREEN, TFT_BLUE };
+
+// Define pins for SoftwareSerial (RX, TX)
+SoftwareSerial mySoftwareSerial(DFPLAYER_RX_PIN, DFPLAYER_TX_PIN); 
+DFRobotDFPlayerMini myDFPlayer;
+bool audioAvailable = false;
+bool dfPlayerAvailable = false;
 
 // Pacman game map
 const int cellSize = 16;
@@ -462,38 +468,56 @@ void handleInput() {
     int dx = jx - JOY_CENTER;
     int dy = jy - JOY_CENTER;
 
+    // Debug: show raw joystick values and deltas
+    Serial.printf("handleInput: jx=%d jy=%d dx=%d dy=%d\n", jx, jy, dx, dy);
+
     if (abs(dx) > JOY_DEADZONE || abs(dy) > JOY_DEADZONE) {
         // Prefer the axis with the larger deflection to get traditional 4-way controls
         if (abs(dx) > abs(dy)) {
             dirX = dx > 0 ? 1 : -1;
             dirY = 0;
+            Serial.printf("Joystick chooses horizontal: dirX=%d dirY=%d\n", dirX, dirY);
         } else {
             dirX = 0;
             // Note: some joysticks invert Y; if Up/Down are flipped, invert the sign here
             dirY = dy > 0 ? 1 : -1;
+            Serial.printf("Joystick chooses vertical: dirX=%d dirY=%d\n", dirX, dirY);
         }
         return;
     }
 
     // Fallback: simple digital buttons (replace pins with your actual buttons)
-    if (digitalRead(35) == LOW) { dirX = 1; dirY = 0; } // Right
-    else if (digitalRead(32) == LOW) { dirX = -1; dirY = 0; } // Left
-    else if (digitalRead(25) == LOW) { dirX = 0; dirY = -1; } // Up
-    else if (digitalRead(26) == LOW) { dirX = 0; dirY = 1; } // Down
+    if (digitalRead(35) == LOW) { dirX = 1; dirY = 0; Serial.println("Button RIGHT (35) pressed"); } // Right
+    else if (digitalRead(32) == LOW) { dirX = -1; dirY = 0; Serial.println("Button LEFT (32) pressed"); } // Left
+    else if (digitalRead(25) == LOW) { dirX = 0; dirY = -1; Serial.println("Button UP (25) pressed"); } // Up
+    else if (digitalRead(26) == LOW) { dirX = 0; dirY = 1; Serial.println("Button DOWN (26) pressed"); } // Down
     else { dirX = 0; dirY = 0; }
+
+    // Debug final direction for this call
+    Serial.printf("handleInput result: dirX=%d dirY=%d\n", dirX, dirY);
 
     // Play sound on a specific button (e.g., GPIO 27)
     // if (digitalRead(27) == LOW) { playWav("/PacManLittleDot.wav"); }
 }
 
 void updateGame() {
+    Serial.printf("updateGame called: pac=(%d,%d) dir=(%d,%d) movementEnabled=%d\n", pacmanX, pacmanY, dirX, dirY, movementEnabled);
     int newX = pacmanX + dirX;
     int newY = pacmanY + dirY;
+    // bounds check to avoid reading outside the map
+    if (newX < 0 || newY < 0 || newX >= mapWidth || newY >= mapHeight) {
+        Serial.printf("updateGame: attempted move out of bounds to (%d,%d)\n", newX, newY);
+        return;
+    }
+
     if (gameMap[newY][newX] != 1) {
+        Serial.printf("updateGame: move allowed to (%d,%d)\n", newX, newY);
         // Update last direction if movement occurs
         if (dirX != 0 || dirY != 0) { lastDirX = dirX; lastDirY = dirY; }
         pacmanX = newX;
         pacmanY = newY;
+        Serial.printf("Pacman moved to (%d,%d)\n", pacmanX, pacmanY);
+
         if (gameMap[pacmanY][pacmanX] == 2) {
             gameMap[pacmanY][pacmanX] = 0;
             // Erase the pellet immediately so it disappears when Pacman eats it
@@ -531,18 +555,22 @@ void updateGame() {
                 return;
             }
         }
+    } else {
+        Serial.printf("updateGame: move blocked by wall at (%d,%d)\n", newX, newY);
     }
 }
 
 void setup() {
     Serial.begin(115200);
     delay(1000);
+    Serial.printf("Reset reason: %d\n", esp_reset_reason());
     Serial.println("--- BOOT SUCCESSFUL ---");
-    boolean x = !SD.begin(5); 
-    Serial.println(x);
+    bool sdok = SD.begin(5);
+    Serial.print("SD.begin: "); Serial.println(sdok ? 1 : 0);
 
-    Serial.println("TFT is initialized");
+    Serial.println("TFT init starting");
     tft.init(); // Initialize with ST7796 driver
+    Serial.println("TFT init done");
     strip.begin();             // Initialize NeoPixel library
     strip.show();              // Initialize all pixels to 'off'
     strip.setBrightness(50);   // Set brightness (0-255)
@@ -575,6 +603,7 @@ void setup() {
     Serial.println(digitalRead(TOUCH_IRQ));
     Serial.println("Touch the screen now — polling for getTouch() for 5 seconds...");
     unsigned long st = millis();
+    unsigned long lastPrint = st;
     while (millis() - st < 5000) {
         uint16_t tx = 0, ty = 0;
         // Print IRQ pin state for visibility
@@ -583,7 +612,12 @@ void setup() {
             Serial.print("getTouch TRUE: "); Serial.print(tx); Serial.print(","); Serial.println(ty);
             break;
         }
-        delay(200);
+        // Periodic status so we can see progress without flooding the log
+        if (millis() - lastPrint >= 1000) {
+            Serial.println("touch poll still waiting...");
+            lastPrint = millis();
+        }
+        delay(10); // short wait to yield and keep watchdog happy
     }
     delay(2000);
 
@@ -620,15 +654,23 @@ void setup() {
 }
 
 void loop() {
-     // Set the first pixel (index 0) to red (255,0,0)
+    Serial.println("loop start");
+    // Quick debug touch poll to catch touches even during other delays
+    uint16_t dbgTx = 0, dbgTy = 0;
+    if (tft.getTouch(&dbgTx, &dbgTy)) {
+        Serial.print("DBG getTouch at "); Serial.print(dbgTx); Serial.print(","); Serial.print(dbgTy);
+        Serial.print(" IRQ="); Serial.println(digitalRead(TOUCH_IRQ));
+    }
+
+    // Small NeoPixel blink (short delays to remain responsive to touch)
     strip.setPixelColor(0, strip.Color(255, 0, 0));
     strip.show(); // Send the data to the pixels
-    delay(1000);  // Wait 1 second
+    delay(200);  // shorter wait to improve responsiveness
 
     // Turn the first pixel off (0,0,0)
     strip.setPixelColor(0, strip.Color(0, 0, 0));
     strip.show();
-    delay(1000);
+    delay(200);
     if (!gameStarted) {
         uint16_t tx = 0, ty = 0;
         bool touched = false;
@@ -645,10 +687,18 @@ void loop() {
         if (touched) {
             Serial.println(F("Touch detected — starting game..."));
 
-            if (dfplayerAvailable) {
-                myDFPlayer.playFolder(1, 1);    // Play first song
+            mySoftwareSerial.begin(9600); // DFPlayer Mini uses 9600 baud
+
+            Serial.println(F("Initializing DFPlayer..."));
+
+            if (!myDFPlayer.begin(mySoftwareSerial)) { 
+                Serial.println(F("Unable to begin. Check connections/SD card."));
+                // proceed without audio instead of hanging
+                audioAvailable = false;
             } else {
-                Serial.println(F("DFPlayer unavailable; continuing without audio"));
+                audioAvailable = true;
+                myDFPlayer.volume(20); // Set volume (0 to 30)
+                myDFPlayer.playFolder(1, 1); // Play first song
             }
             
             // If we're showing the replay/win screen, touching should reset the game state
