@@ -464,38 +464,56 @@ void handleInput() {
     int dx = jx - JOY_CENTER;
     int dy = jy - JOY_CENTER;
 
+    // Debug: show raw joystick values and deltas
+    Serial.printf("handleInput: jx=%d jy=%d dx=%d dy=%d\n", jx, jy, dx, dy);
+
     if (abs(dx) > JOY_DEADZONE || abs(dy) > JOY_DEADZONE) {
         // Prefer the axis with the larger deflection to get traditional 4-way controls
         if (abs(dx) > abs(dy)) {
             dirX = dx > 0 ? 1 : -1;
             dirY = 0;
+            Serial.printf("Joystick chooses horizontal: dirX=%d dirY=%d\n", dirX, dirY);
         } else {
             dirX = 0;
             // Note: some joysticks invert Y; if Up/Down are flipped, invert the sign here
             dirY = dy > 0 ? 1 : -1;
+            Serial.printf("Joystick chooses vertical: dirX=%d dirY=%d\n", dirX, dirY);
         }
         return;
     }
 
     // Fallback: simple digital buttons (replace pins with your actual buttons)
-    if (digitalRead(35) == LOW) { dirX = 1; dirY = 0; } // Right
-    else if (digitalRead(32) == LOW) { dirX = -1; dirY = 0; } // Left
-    else if (digitalRead(25) == LOW) { dirX = 0; dirY = -1; } // Up
-    else if (digitalRead(26) == LOW) { dirX = 0; dirY = 1; } // Down
+    if (digitalRead(35) == LOW) { dirX = 1; dirY = 0; Serial.println("Button RIGHT (35) pressed"); } // Right
+    else if (digitalRead(32) == LOW) { dirX = -1; dirY = 0; Serial.println("Button LEFT (32) pressed"); } // Left
+    else if (digitalRead(25) == LOW) { dirX = 0; dirY = -1; Serial.println("Button UP (25) pressed"); } // Up
+    else if (digitalRead(26) == LOW) { dirX = 0; dirY = 1; Serial.println("Button DOWN (26) pressed"); } // Down
     else { dirX = 0; dirY = 0; }
+
+    // Debug final direction for this call
+    Serial.printf("handleInput result: dirX=%d dirY=%d\n", dirX, dirY);
 
     // Play sound on a specific button (e.g., GPIO 27)
     // if (digitalRead(27) == LOW) { playWav("/PacManLittleDot.wav"); }
 }
 
 void updateGame() {
+    Serial.printf("updateGame called: pac=(%d,%d) dir=(%d,%d) movementEnabled=%d\n", pacmanX, pacmanY, dirX, dirY, movementEnabled);
     int newX = pacmanX + dirX;
     int newY = pacmanY + dirY;
+    // bounds check to avoid reading outside the map
+    if (newX < 0 || newY < 0 || newX >= mapWidth || newY >= mapHeight) {
+        Serial.printf("updateGame: attempted move out of bounds to (%d,%d)\n", newX, newY);
+        return;
+    }
+
     if (gameMap[newY][newX] != 1) {
+        Serial.printf("updateGame: move allowed to (%d,%d)\n", newX, newY);
         // Update last direction if movement occurs
         if (dirX != 0 || dirY != 0) { lastDirX = dirX; lastDirY = dirY; }
         pacmanX = newX;
         pacmanY = newY;
+        Serial.printf("Pacman moved to (%d,%d)\n", pacmanX, pacmanY);
+
         if (gameMap[pacmanY][pacmanX] == 2) {
             gameMap[pacmanY][pacmanX] = 0;
             // Erase the pellet immediately so it disappears when Pacman eats it
@@ -533,6 +551,8 @@ void updateGame() {
                 return;
             }
         }
+    } else {
+        Serial.printf("updateGame: move blocked by wall at (%d,%d)\n", newX, newY);
     }
 }
 
